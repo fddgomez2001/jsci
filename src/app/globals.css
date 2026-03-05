@@ -172,8 +172,13 @@ body {
 /* Dark Mode Global Overrides                   */
 /* ============================================ */
 body.dark-mode {
-  background: linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%);
+  background: #1a1a2e !important;
   color: #e0e0e0;
+}
+
+html.dark-mode,
+html:has(body.dark-mode) {
+  background: #1a1a2e !important;
 }
 
 body.dark-mode .dark-mode-toggle {

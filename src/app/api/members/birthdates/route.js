@@ -6,7 +6,7 @@ export async function GET() {
   try {
     const { data: members, error } = await supabase
       .from('users')
-      .select('firstname, lastname, birthdate, ministry, status')
+      .select('firstname, lastname, birthdate, ministry, status, profile_picture')
       .not('birthdate', 'is', null);
 
     if (error) {
@@ -15,9 +15,12 @@ export async function GET() {
 
     const formatted = (members || []).map((m) => ({
       fullName: `${m.firstname} ${m.lastname}`,
+      firstname: m.firstname,
+      lastname: m.lastname,
       birthdate: m.birthdate,
       ministry: m.ministry,
       status: m.status,
+      profile_picture: m.profile_picture || null,
     }));
 
     return NextResponse.json({ success: true, data: formatted });

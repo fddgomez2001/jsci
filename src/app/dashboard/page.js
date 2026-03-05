@@ -2,8 +2,11 @@
 
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
+import dynamic from 'next/dynamic';
 import { ROLES, MODULES, hasPermission, hasAnyPermission, getSidebarMenu, getDashboardType } from '@/lib/permissions';
 import './dashboard.css';
+
+const Cropper = dynamic(() => import('react-easy-crop'), { ssr: false });
 
 // ============================================
 // CONSTANTS
@@ -19,7 +22,7 @@ const USER_EVENT_TYPES = ['Event', 'Meeting', 'Bible Study', 'Prayer Meeting', '
 
 // Ministry → Sub-Role mapping (Admin picks ministry, then sub-role dropdown shows these)
 const MINISTRY_SUB_ROLES = {
-  'Praise And Worship': ['Song Leaders', 'Song Leader Backupers', 'Instrumentalists', 'Dancers'],
+  'Praise And Worship': ['Song Leaders', 'Backup Singer', 'Instrumentalists', 'Dancers'],
   'Media': ['Lyrics', 'Multimedia'],
   'Dancers': ['Choreographer', 'Dancer'],
   'Ashers': ['Head Usher', 'Usher'],
@@ -196,19 +199,27 @@ export default function DashboardPage() {
   // Create Lineup
   const [lineupForm, setLineupForm] = useState({
     scheduleDate: '', practiceDate: '', songLeader: '',
-    backupSingers: [''], slowSongs: [{ title: '', link: '', lyrics: '', instructions: '' }],
+    backupSingers: [], slowSongs: [{ title: '', link: '', lyrics: '', instructions: '' }],
     fastSongs: [{ title: '', link: '', lyrics: '', instructions: '' }],
   });
   const [lineupLoading, setLineupLoading] = useState(false);
   const [lineupView, setLineupView] = useState('calendar'); // 'calendar' | 'form' | 'success'
   const [lineupSelectedDate, setLineupSelectedDate] = useState(null);
   const [lineupCalendarMonth, setLineupCalendarMonth] = useState(new Date());
+  const [lineupTab, setLineupTab] = useState('assign'); // 'assign' | 'all' | 'paw-logs'
+
+  // PAW Logs
+  const [pawLogsSearch, setPawLogsSearch] = useState('');
+  const [pawLogsFilter, setPawLogsFilter] = useState('All'); // 'All' | 'Pending' | 'Approved' | 'Rejected'
+  const [pawLogsRoleFilter, setPawLogsRoleFilter] = useState('All'); // 'All' | 'Song Leader' | 'Backup Singer' | 'Instrumentalist' | 'Dancer' | 'Media'
+  const [pawAllMembers, setPawAllMembers] = useState([]); // All PAW ministry members with profile pics
 
   // AI Song Scanner
   // Key format: "slowSongs-0", "fastSongs-1", etc.
   // Value: { status: 'scanning'|'safe'|'explicit'|'warning'|'error', message: string, details: string }
   const [songScanResults, setSongScanResults] = useState({});
   const songScanTimers = useRef({});
+  const [songAutoFillLoading, setSongAutoFillLoading] = useState({}); // { 'slowSongs-0': true } when auto-filling title from YT
 
   // My Lineups
   const [myLineups, setMyLineups] = useState([]);
@@ -223,14 +234,52 @@ export default function DashboardPage() {
 
   // Detail popup for Song Leader viewing other dates
   const [lineupDetailPopup, setLineupDetailPopup] = useState(null); // { songLeader, backupSingers, date }
+  const [lineupViewingAssignment, setLineupViewingAssignment] = useState(null); // for viewing assignment details in All Assignments
+
+  // Lineup Excuses
+  const [lineupExcuses, setLineupExcuses] = useState([]); // all excuses loaded
+  const [excuseModalDate, setExcuseModalDate] = useState(null); // date being excused (Song Leader)
+  const [excuseReason, setExcuseReason] = useState('');
+  const [excuseLoading, setExcuseLoading] = useState(false);
+
+  // Lineup Substitutes
+  const [subRequests, setSubRequests] = useState([]);
+  const [subModalDate, setSubModalDate] = useState(null); // date for sub request modal
+  const [subModalScheduleId, setSubModalScheduleId] = useState(null);
+  const [subReason, setSubReason] = useState('');
+  const [subLoading, setSubLoading] = useState(false);
+  const [subThankYouModal, setSubThankYouModal] = useState(null); // { subId, subName }
+  const [subThankYouMessage, setSubThankYouMessage] = useState('');
+  const [pawLogsSubTab, setPawLogsSubTab] = useState('excuses'); // 'excuses' | 'substitutes' (admin PAW Logs)
 
   // Profile
   const [profileTab, setProfileTab] = useState('personal');
-  const [profileForm, setProfileForm] = useState({ firstname: '', lastname: '' });
+  const [profileForm, setProfileForm] = useState({ firstname: '', lastname: '', birthdate: '', life_verse: '' });
   const [passwordForm, setPasswordForm] = useState({ currentPassword: '', newPassword: '', confirmPassword: '' });
   const [setPasswordFormData, setSetPasswordFormData] = useState({ newPassword: '', confirmPassword: '' });
   const [hasLocalPassword, setHasLocalPassword] = useState(true);
   const [profileLoading, setProfileLoading] = useState(false);
+
+  // Profile Picture Upload/Crop
+  const [showCropModal, setShowCropModal] = useState(false);
+  const [closingCropModal, setClosingCropModal] = useState(false);
+  const [cropImage, setCropImage] = useState(null);
+  const [crop, setCrop] = useState({ x: 0, y: 0 });
+  const [zoom, setZoom] = useState(1);
+  const [croppedAreaPixels, setCroppedAreaPixels] = useState(null);
+  const [uploadingPic, setUploadingPic] = useState(false);
+  const profilePicInputRef = useRef(null);
+  const [showAvatarMenu, setShowAvatarMenu] = useState(false);
+  const [viewProfilePic, setViewProfilePic] = useState(false);
+  const avatarMenuRef = useRef(null);
+  const avatarWrapperRef = useRef(null);
+
+  // Password visibility toggles
+  const [showCurrentPassword, setShowCurrentPassword] = useState(false);
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [showSetNewPassword, setShowSetNewPassword] = useState(false);
+  const [showSetConfirmPassword, setShowSetConfirmPassword] = useState(false);
 
   // Bible Reader
   const [bibleBook, setBibleBook] = useState('Genesis');
@@ -295,6 +344,14 @@ export default function DashboardPage() {
   const [commentInputs, setCommentInputs] = useState({});
   const [postComments, setPostComments] = useState({});
   const [showComments, setShowComments] = useState({});
+  const [editingPost, setEditingPost] = useState(null);
+  const [editPostContent, setEditPostContent] = useState('');
+  const [editingComment, setEditingComment] = useState(null);
+  const [editCommentContent, setEditCommentContent] = useState('');
+  const [commentLikeAnimating, setCommentLikeAnimating] = useState({});
+  const [viewingProfile, setViewingProfile] = useState(null);
+  const [postMenuOpen, setPostMenuOpen] = useState(null);
+  const [commentMenuOpen, setCommentMenuOpen] = useState(null);
 
   // Messages
   const [messages, setMessages] = useState([]);
@@ -320,6 +377,16 @@ export default function DashboardPage() {
   const [userForm, setUserForm] = useState({ firstname: '', lastname: '', email: '', password: '', ministry: '', sub_role: '', role: 'Guest' });
   const [editingUser, setEditingUser] = useState(null);
   const [showEditModal, setShowEditModal] = useState(false);
+  const [userSearch, setUserSearch] = useState('');
+  const [userFilterRole, setUserFilterRole] = useState('');
+  const [userFilterMinistry, setUserFilterMinistry] = useState('');
+  const [userFilterStatus, setUserFilterStatus] = useState('');
+  const [userActionMenu, setUserActionMenu] = useState(null);
+  const [confirmAction, setConfirmAction] = useState(null);
+  const [showResetPwModal, setShowResetPwModal] = useState(null);
+  const [resetPwForm, setResetPwForm] = useState({ newPassword: '', confirmPassword: '' });
+  const [showResetPw, setShowResetPw] = useState({ new: false, confirm: false });
+  const [newSubRoleInput, setNewSubRoleInput] = useState('');
 
   // Admin: Ministry Management
   const [ministriesList, setMinistriesList] = useState([]);
@@ -334,6 +401,20 @@ export default function DashboardPage() {
 
   // Super Admin: System Settings
   const [systemSettings, setSystemSettings] = useState({});
+
+  // Praise & Worship
+  const [pawSchedules, setPawSchedules] = useState([]);
+  const [pawMySchedules, setPawMySchedules] = useState([]);
+  const [pawNotifications, setPawNotifications] = useState([]);
+  const [pawBibleVerse, setPawBibleVerse] = useState(null);
+  const [pawBibleVerseLoading, setPawBibleVerseLoading] = useState(false);
+  const [pawSelectedSchedule, setPawSelectedSchedule] = useState(null);
+  const [pawTab, setPawTab] = useState('schedules'); // 'schedules' | 'my-schedule' | 'notifications'
+  const [pawLyricsModal, setPawLyricsModal] = useState(null); // { title, lyrics, artist, thumbnail, loading }
+  const [pawPlayingSong, setPawPlayingSong] = useState(null); // { key: 'slow-0', videoId: 'abc' } or null
+  const [pawAudioTime, setPawAudioTime] = useState({ current: 0, duration: 0 });
+  const pawPlayerRef = useRef(null);
+  const pawProgressRef = useRef(null);
 
   // Logout
   const [showLogoutModal, setShowLogoutModal] = useState(false);
@@ -354,12 +435,15 @@ export default function DashboardPage() {
     setUserData(stored);
     setUserRole(stored.role || 'Guest');
     setIsVerified(stored.status === 'Verified');
-    setProfileForm({ firstname: stored.firstname, lastname: stored.lastname });
+    setProfileForm({ firstname: stored.firstname, lastname: stored.lastname, birthdate: stored.birthdate || '', life_verse: stored.life_verse || '' });
     setHasLocalPassword(stored.hasPassword !== false);
 
     const savedDark = localStorage.getItem('darkModeEnabled') === 'true';
     setDarkMode(savedDark);
-    if (savedDark) document.body.classList.add('dark-mode');
+    if (savedDark) {
+      document.body.classList.add('dark-mode');
+      document.documentElement.classList.add('dark-mode');
+    }
 
     // Load saved Bible version preference
     const savedVersion = localStorage.getItem('bibleVersionPref');
@@ -451,6 +535,7 @@ export default function DashboardPage() {
     setDarkMode(next);
     localStorage.setItem('darkModeEnabled', next);
     document.body.classList.toggle('dark-mode', next);
+    document.documentElement.classList.toggle('dark-mode', next);
   };
 
   // ============================================
@@ -479,8 +564,9 @@ export default function DashboardPage() {
     if (sectionId === 'roles-permissions') loadRoles();
     if (sectionId === 'audit-logs') loadAuditLogs();
     if (sectionId === 'system-config') loadSystemSettings();
-    if (sectionId === 'create-lineup') { loadScheduleData(); if (userRole === 'Admin' || userRole === 'Super Admin') { loadBackupSingers(); loadSongLeaders(); } }
+    if (sectionId === 'create-lineup') { loadScheduleData(); loadLineupExcuses(); loadSubRequests(); loadPawMembers(); if (userRole === 'Admin' || userRole === 'Super Admin') { loadBackupSingers(); loadSongLeaders(); } }
     if (sectionId === 'my-lineups') loadScheduleData();
+    if (sectionId === 'praise-worship') { loadPawSchedules(); loadPawMySchedules(); loadPawNotifications(); const subRole = userData?.sub_role || ''; const ministry = userData?.ministry || ''; let roleLabel = subRole || ministry || 'Worship Team Member'; fetchPawBibleVerse(roleLabel); }
     if (sectionId === 'my-created-events') { loadUserEvents(); loadBrowseUserEvents(); }
     if (sectionId === 'community-events') loadBrowseUserEvents();
     if (sectionId === 'user-events-oversight') loadAllUserEventsForPastor();
@@ -527,7 +613,7 @@ export default function DashboardPage() {
     try {
       const res = await fetch('/api/schedules');
       const data = await res.json();
-      if (data.success) setScheduleData(data.data.map((s) => ({ ...s, scheduleDate: s.schedule_date, songLeader: s.song_leader, backupSingers: s.backup_singers || [], practiceDate: s.practice_date, slowSongs: s.slow_songs || [], fastSongs: s.fast_songs || [] })));
+      if (data.success) setScheduleData(data.data || []);
     } catch { /* silent */ }
   };
 
@@ -576,7 +662,7 @@ export default function DashboardPage() {
 
   const loadCommunityPosts = async () => {
     try {
-      const res = await fetch('/api/community');
+      const res = await fetch(`/api/community${userData?.id ? `?userId=${userData.id}` : ''}`);
       const data = await res.json();
       if (data.success) setCommunityPosts(data.data);
     } catch { /* silent */ }
@@ -690,6 +776,161 @@ export default function DashboardPage() {
       const data = await res.json();
       if (data.success) setPastorEventRsvps(data);
     } catch { /* silent */ }
+  };
+
+  // Praise & Worship data loaders
+  const loadPawSchedules = async () => {
+    try {
+      const res = await fetch('/api/praise-worship?type=schedules');
+      const data = await res.json();
+      if (data.success) setPawSchedules(data.data || []);
+    } catch { /* silent */ }
+  };
+
+  const loadPawMySchedules = async () => {
+    try {
+      if (!userData?.id) return;
+      const res = await fetch(`/api/praise-worship?type=my-schedule&userId=${userData.id}`);
+      const data = await res.json();
+      if (data.success) setPawMySchedules(data.data || []);
+    } catch { /* silent */ }
+  };
+
+  const loadPawNotifications = async () => {
+    try {
+      if (!userData?.id) return;
+      const res = await fetch(`/api/praise-worship?type=notifications&userId=${userData.id}`);
+      const data = await res.json();
+      if (data.success) setPawNotifications(data.data || []);
+    } catch { /* silent */ }
+  };
+
+  // Fetch lyrics using Groq AI (passes YouTube link for accurate song identification)
+  const fetchSongLyrics = async (songTitle, songLink) => {
+    setPawLyricsModal({ title: songTitle, lyrics: null, artist: null, loading: true });
+    try {
+      let url = `/api/lyrics?title=${encodeURIComponent(songTitle)}`;
+      if (songLink) url += `&link=${encodeURIComponent(songLink)}`;
+      const res = await fetch(url);
+      const data = await res.json();
+      if (data.success && data.data && data.data.lyrics) {
+        setPawLyricsModal({ title: data.data.title || songTitle, lyrics: data.data.lyrics, artist: data.data.artist, loading: false });
+      } else {
+        setPawLyricsModal({ title: songTitle, lyrics: null, artist: '', loading: false });
+      }
+    } catch {
+      setPawLyricsModal({ title: songTitle, lyrics: null, artist: '', loading: false });
+    }
+  };
+
+  // YouTube IFrame API: load script once
+  useEffect(() => {
+    if (typeof window !== 'undefined' && !window.YT) {
+      const tag = document.createElement('script');
+      tag.src = 'https://www.youtube.com/iframe_api';
+      document.body.appendChild(tag);
+    }
+  }, []);
+
+  // YouTube IFrame API: create/destroy player when song changes
+  useEffect(() => {
+    if (pawPlayerRef.current) {
+      try { pawPlayerRef.current.destroy(); } catch (e) { /* ignore */ }
+      pawPlayerRef.current = null;
+    }
+    if (pawProgressRef.current) {
+      clearInterval(pawProgressRef.current);
+      pawProgressRef.current = null;
+    }
+    if (!pawPlayingSong) {
+      setPawAudioTime({ current: 0, duration: 0 });
+      return;
+    }
+    const createPlayer = () => {
+      const wrapper = document.getElementById('paw-yt-player-wrapper');
+      if (wrapper) wrapper.innerHTML = '<div id="paw-yt-player-el"></div>';
+      pawPlayerRef.current = new window.YT.Player('paw-yt-player-el', {
+        height: '0', width: '0',
+        videoId: pawPlayingSong.videoId,
+        playerVars: { autoplay: 1, controls: 0, disablekb: 1, fs: 0, modestbranding: 1 },
+        events: {
+          onReady: (ev) => {
+            ev.target.playVideo();
+            setTimeout(() => {
+              const dur = ev.target.getDuration ? ev.target.getDuration() : 0;
+              setPawAudioTime({ current: 0, duration: dur });
+            }, 500);
+            pawProgressRef.current = setInterval(() => {
+              if (pawPlayerRef.current && pawPlayerRef.current.getCurrentTime) {
+                const ct = pawPlayerRef.current.getCurrentTime();
+                const d = pawPlayerRef.current.getDuration();
+                setPawAudioTime({ current: ct, duration: d });
+              }
+            }, 500);
+          },
+          onStateChange: (ev) => {
+            if (ev.data === window.YT.PlayerState.ENDED) {
+              setPawPlayingSong(null);
+            }
+          }
+        }
+      });
+    };
+    const waitForYT = () => {
+      if (window.YT && window.YT.Player) { createPlayer(); }
+      else { setTimeout(waitForYT, 300); }
+    };
+    waitForYT();
+    return () => {
+      if (pawPlayerRef.current) { try { pawPlayerRef.current.destroy(); } catch (e) { /* ignore */ } pawPlayerRef.current = null; }
+      if (pawProgressRef.current) { clearInterval(pawProgressRef.current); pawProgressRef.current = null; }
+    };
+  }, [pawPlayingSong?.key]);
+
+  const formatPawTime = (sec) => {
+    if (!sec || isNaN(sec)) return '0:00';
+    const m = Math.floor(sec / 60);
+    const s = Math.floor(sec % 60);
+    return `${m}:${s.toString().padStart(2, '0')}`;
+  };
+
+  const handlePawSeek = (e) => {
+    if (!pawPlayerRef.current || !pawAudioTime.duration) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const pct = Math.max(0, Math.min(1, x / rect.width));
+    const seekTime = pct * pawAudioTime.duration;
+    pawPlayerRef.current.seekTo(seekTime, true);
+    setPawAudioTime(prev => ({ ...prev, current: seekTime }));
+  };
+
+  const fetchPawBibleVerse = async (roleLabel) => {
+    if (pawBibleVerse && pawBibleVerse.role === roleLabel) return; // Already fetched for this role
+    setPawBibleVerseLoading(true);
+    try {
+      const response = await fetch(GROQ_API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${GROQ_API_KEY}` },
+        body: JSON.stringify({
+          model: 'meta-llama/llama-4-scout-17b-16e-instruct',
+          messages: [
+            { role: 'system', content: `You provide encouraging Bible verses specifically for church ministry members serving as "${roleLabel}" in Praise and Worship ministry. The verse should relate to their role and encourage them in their service. Return ONLY a JSON object: {"verse":"the actual verse text", "reference":"Book Chapter:Verse", "encouragement":"a brief 1-2 sentence encouragement specifically for this role"}` },
+            { role: 'user', content: `Provide an encouraging Bible verse for a ${roleLabel} in the Praise and Worship ministry for today, ${new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}.` },
+          ],
+          temperature: 0.8, max_tokens: 300,
+        }),
+      });
+      const data = await response.json();
+      const text = data?.choices?.[0]?.message?.content;
+      if (text) {
+        const jsonMatch = text.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          const verse = JSON.parse(jsonMatch[0]);
+          setPawBibleVerse({ ...verse, role: roleLabel });
+        }
+      }
+    } catch { setPawBibleVerse({ verse: 'Sing to the Lord a new song; sing to the Lord, all the earth.', reference: 'Psalm 96:1', encouragement: 'Your worship is a beautiful offering to God. Keep singing His praises!', role: roleLabel }); }
+    setPawBibleVerseLoading(false);
   };
 
   // ============================================
@@ -862,6 +1103,9 @@ export default function DashboardPage() {
   };
 
   // -- Community Hub --
+  const [likeAnimating, setLikeAnimating] = useState({});
+  const [deletingPost, setDeletingPost] = useState(null);
+
   const handleCreatePost = async () => {
     if (!newPostContent.trim()) return;
     const res = await fetch('/api/community', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ authorId: userData?.id, authorName: `${userData?.firstname} ${userData?.lastname}`, content: newPostContent }) });
@@ -869,13 +1113,36 @@ export default function DashboardPage() {
     if (data.success) { setNewPostContent(''); loadCommunityPosts(); showToast('Post shared!', 'success'); }
   };
 
+  const handleEditPost = async (postId) => {
+    if (!editPostContent.trim()) return;
+    const res = await fetch('/api/community', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: postId, content: editPostContent, userId: userData?.id }) });
+    const data = await res.json();
+    if (data.success) { setEditingPost(null); setEditPostContent(''); loadCommunityPosts(); showToast('Post updated!', 'success'); }
+    else showToast(data.message || 'Failed to update', 'error');
+  };
+
   const handleLikePost = async (postId) => {
+    setCommunityPosts(prev => prev.map(p => p.id === postId ? { ...p, liked: !p.liked, likeCount: p.liked ? (p.likeCount - 1) : (p.likeCount + 1) } : p));
+    setLikeAnimating(prev => ({ ...prev, [postId]: true }));
+    setTimeout(() => setLikeAnimating(prev => ({ ...prev, [postId]: false })), 600);
     const res = await fetch('/api/community/like', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ postId, userId: userData?.id }) });
-    if ((await res.json()).success) loadCommunityPosts();
+    if (!(await res.json()).success) loadCommunityPosts();
+  };
+
+  const handleDeletePost = async (postId) => {
+    if (!confirm('Are you sure you want to delete this post?')) return;
+    setDeletingPost(postId);
+    setTimeout(async () => {
+      const res = await fetch(`/api/community?id=${postId}&userId=${userData?.id}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (data.success) { setCommunityPosts(prev => prev.filter(p => p.id !== postId)); showToast('Post deleted', 'success'); }
+      else { showToast(data.message || 'Failed to delete', 'error'); }
+      setDeletingPost(null);
+    }, 300);
   };
 
   const loadPostComments = async (postId) => {
-    const res = await fetch(`/api/community/comments?postId=${postId}`);
+    const res = await fetch(`/api/community/comments?postId=${postId}&userId=${userData?.id}`);
     const data = await res.json();
     if (data.success) setPostComments((prev) => ({ ...prev, [postId]: data.data }));
   };
@@ -887,10 +1154,142 @@ export default function DashboardPage() {
     if ((await res.json()).success) { setCommentInputs((p) => ({ ...p, [postId]: '' })); loadPostComments(postId); loadCommunityPosts(); }
   };
 
+  const handleEditComment = async (commentId, postId) => {
+    if (!editCommentContent.trim()) return;
+    const res = await fetch('/api/community/comments', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: commentId, userId: userData?.id, content: editCommentContent }) });
+    if ((await res.json()).success) { setEditingComment(null); setEditCommentContent(''); loadPostComments(postId); showToast('Comment updated', 'success'); }
+    else showToast('Failed to update comment', 'error');
+  };
+
+  const handleDeleteComment = async (commentId, postId) => {
+    if (!confirm('Delete this comment?')) return;
+    const res = await fetch(`/api/community/comments?id=${commentId}&userId=${userData?.id}`, { method: 'DELETE' });
+    if ((await res.json()).success) { loadPostComments(postId); loadCommunityPosts(); showToast('Comment deleted', 'success'); }
+    else showToast('Failed to delete comment', 'error');
+  };
+
+  const handleLikeComment = async (commentId, postId) => {
+    // Optimistic update
+    setPostComments(prev => ({
+      ...prev,
+      [postId]: (prev[postId] || []).map(c => c.id === commentId ? { ...c, liked: !c.liked, likeCount: c.liked ? (c.likeCount - 1) : (c.likeCount + 1) } : c)
+    }));
+    setCommentLikeAnimating(prev => ({ ...prev, [commentId]: true }));
+    setTimeout(() => setCommentLikeAnimating(prev => ({ ...prev, [commentId]: false })), 600);
+    const res = await fetch('/api/community/comments/like', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ commentId, userId: userData?.id }) });
+    if (!(await res.json()).success) loadPostComments(postId);
+  };
+
+  const handleViewProfile = async (authorId, authorName, authorPicture) => {
+    if (!authorId) return;
+    try {
+      const res = await fetch(`/api/profile/update?userId=${authorId}`);
+      const data = await res.json();
+      if (data.success) {
+        setViewingProfile({ ...data.data, author_name: authorName, profile_picture: authorPicture || data.data?.profile_picture });
+      } else {
+        setViewingProfile({ author_name: authorName, profile_picture: authorPicture, role: 'Member' });
+      }
+    } catch {
+      setViewingProfile({ author_name: authorName, profile_picture: authorPicture, role: 'Member' });
+    }
+  };
+
   const handlePinPost = async (postId, isPinned) => {
     await fetch('/api/community', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: postId, isPinned: !isPinned }) });
     loadCommunityPosts();
   };
+
+  // Bible content for sidebar cards (rotates hourly)
+  const bibleVerses = [
+    { ref: 'Jeremiah 29:11', text: 'For I know the plans I have for you, declares the Lord, plans to prosper you and not to harm you, plans to give you hope and a future.' },
+    { ref: 'Philippians 4:13', text: 'I can do all things through Christ who strengthens me.' },
+    { ref: 'Psalm 23:1', text: 'The Lord is my shepherd; I shall not want.' },
+    { ref: 'Romans 8:28', text: 'And we know that in all things God works for the good of those who love him.' },
+    { ref: 'Isaiah 41:10', text: 'So do not fear, for I am with you; do not be dismayed, for I am your God.' },
+    { ref: 'Proverbs 3:5-6', text: 'Trust in the Lord with all your heart and lean not on your own understanding; in all your ways submit to him, and he will make your paths straight.' },
+    { ref: 'John 3:16', text: 'For God so loved the world that he gave his one and only Son, that whoever believes in him shall not perish but have eternal life.' },
+    { ref: 'Psalm 46:1', text: 'God is our refuge and strength, an ever-present help in trouble.' },
+    { ref: 'Matthew 11:28', text: 'Come to me, all you who are weary and burdened, and I will give you rest.' },
+    { ref: 'Joshua 1:9', text: 'Be strong and courageous. Do not be afraid; do not be discouraged, for the Lord your God will be with you wherever you go.' },
+    { ref: 'Psalm 119:105', text: 'Your word is a lamp for my feet, a light on my path.' },
+    { ref: 'Romans 12:2', text: 'Do not conform to the pattern of this world, but be transformed by the renewing of your mind.' },
+    { ref: '2 Corinthians 5:7', text: 'For we live by faith, not by sight.' },
+    { ref: 'Galatians 5:22-23', text: 'But the fruit of the Spirit is love, joy, peace, forbearance, kindness, goodness, faithfulness, gentleness and self-control.' },
+    { ref: 'Hebrews 11:1', text: 'Now faith is confidence in what we hope for and assurance about what we do not see.' },
+    { ref: '1 John 4:19', text: 'We love because he first loved us.' },
+    { ref: 'Ephesians 2:8-9', text: 'For it is by grace you have been saved, through faith—and this is not from yourselves, it is the gift of God.' },
+    { ref: 'Psalm 37:4', text: 'Take delight in the Lord, and he will give you the desires of your heart.' },
+    { ref: 'Colossians 3:23', text: 'Whatever you do, work at it with all your heart, as working for the Lord, not for human masters.' },
+    { ref: 'Lamentations 3:22-23', text: 'Because of the Lord\'s great love we are not consumed, for his compassions never fail. They are new every morning; great is your faithfulness.' },
+    { ref: 'Psalm 91:1-2', text: 'Whoever dwells in the shelter of the Most High will rest in the shadow of the Almighty.' },
+    { ref: 'Isaiah 40:31', text: 'But those who hope in the Lord will renew their strength. They will soar on wings like eagles.' },
+    { ref: 'Matthew 6:33', text: 'But seek first his kingdom and his righteousness, and all these things will be given to you as well.' },
+    { ref: '2 Timothy 1:7', text: 'For the Spirit God gave us does not make us timid, but gives us power, love and self-discipline.' },
+  ];
+
+  const bibleFacts = [
+    { emoji: '📖', fact: 'The Bible has 66 books — 39 in the Old Testament and 27 in the New Testament.' },
+    { emoji: '✍️', fact: 'The Bible was written by about 40 different authors over approximately 1,500 years.' },
+    { emoji: '📏', fact: 'The longest chapter in the Bible is Psalm 119, with 176 verses.' },
+    { emoji: '📝', fact: 'The shortest verse in the Bible is John 11:35 — "Jesus wept."' },
+    { emoji: '🌍', fact: 'The Bible has been translated into over 3,500 languages worldwide.' },
+    { emoji: '📚', fact: 'There are 31,102 verses in the Bible.' },
+    { emoji: '🕊️', fact: 'The word "love" appears 310 times in the King James Version.' },
+    { emoji: '⏳', fact: 'Methuselah is the oldest person in the Bible — he lived 969 years.' },
+    { emoji: '🦁', fact: 'The book of Esther never mentions the word "God" directly.' },
+    { emoji: '🎵', fact: 'The Psalms is the longest book in the Bible with 150 chapters.' },
+    { emoji: '🐋', fact: 'Jonah survived three days and three nights inside a great fish.' },
+    { emoji: '👶', fact: 'Samuel was the youngest person in the Bible to hear God\'s voice.' },
+    { emoji: '🗡️', fact: 'David defeated Goliath with just a sling and a single stone.' },
+    { emoji: '🌊', fact: 'Moses parted the Red Sea so the Israelites could escape Egypt.' },
+    { emoji: '🔥', fact: 'The burning bush that Moses saw was not consumed by the fire.' },
+    { emoji: '🌈', fact: 'The rainbow is God\'s promise to Noah to never flood the entire earth again.' },
+    { emoji: '🍞', fact: 'Jesus fed 5,000 people with just five loaves and two fish.' },
+    { emoji: '💪', fact: 'Samson\'s strength came from his uncut hair as a Nazirite vow to God.' },
+    { emoji: '🏛️', fact: 'Solomon\'s Temple took seven years to build.' },
+    { emoji: '📜', fact: 'The Dead Sea Scrolls, discovered in 1947, contain the oldest known biblical manuscripts.' },
+    { emoji: '🌟', fact: 'The Star of Bethlehem guided the wise men to baby Jesus.' },
+    { emoji: '🐑', fact: 'Jesus is called the Lamb of God, symbolizing His sacrifice for humanity.' },
+    { emoji: '🗝️', fact: 'Jesus gave Peter the "keys to the kingdom of heaven" in Matthew 16:19.' },
+    { emoji: '🌿', fact: 'The Garden of Eden had the Tree of Life and the Tree of Knowledge of Good and Evil.' },
+  ];
+
+  const bibleTrivia = [
+    { q: 'Who built the ark?', a: 'Noah — he was commanded by God to build it before the great flood.' },
+    { q: 'What are the first words of the Bible?', a: '"In the beginning God created the heavens and the earth." (Genesis 1:1)' },
+    { q: 'How many days did God take to create the world?', a: 'Six days — He rested on the seventh day.' },
+    { q: 'Who was the first king of Israel?', a: 'Saul — anointed by the prophet Samuel.' },
+    { q: 'What is the last book of the Bible?', a: 'Revelation — written by the Apostle John.' },
+    { q: 'Who was thrown into the lion\'s den?', a: 'Daniel — and God sent an angel to shut the lions\' mouths.' },
+    { q: 'What did Moses receive on Mount Sinai?', a: 'The Ten Commandments — written on stone tablets by God.' },
+    { q: 'Who betrayed Jesus?', a: 'Judas Iscariot — for 30 pieces of silver.' },
+    { q: 'How many apostles did Jesus choose?', a: '12 apostles — who became the foundation of the early church.' },
+    { q: 'Who denied Jesus three times?', a: 'Peter — just as Jesus had predicted.' },
+    { q: 'What was Jesus\' first miracle?', a: 'Turning water into wine at the wedding in Cana.' },
+    { q: 'Who was swallowed by a great fish?', a: 'Jonah — after trying to flee from God\'s command.' },
+    { q: 'What is the Golden Rule?', a: '"Do unto others as you would have them do unto you." (Matthew 7:12)' },
+    { q: 'Which two cities did God destroy?', a: 'Sodom and Gomorrah — because of their great wickedness.' },
+    { q: 'Who wrote most of the Psalms?', a: 'King David — he wrote approximately 73 of the 150 Psalms.' },
+    { q: 'What river was Jesus baptized in?', a: 'The Jordan River — by John the Baptist.' },
+    { q: 'Who was the wisest man in the Bible?', a: 'King Solomon — God granted him extraordinary wisdom.' },
+    { q: 'What did God create on the fourth day?', a: 'The sun, moon, and stars.' },
+    { q: 'Who interpreted Pharaoh\'s dreams?', a: 'Joseph — predicting seven years of plenty and seven of famine.' },
+    { q: 'What was Paul\'s name before conversion?', a: 'Saul of Tarsus — he persecuted Christians before meeting Jesus on the road to Damascus.' },
+    { q: 'How old was Jesus when He began His ministry?', a: 'About 30 years old (Luke 3:23).' },
+    { q: 'Who helped carry the cross for Jesus?', a: 'Simon of Cyrene — the Roman soldiers forced him.' },
+    { q: 'What is the shortest book in the Bible?', a: '3 John — with only one chapter and 219 words in Greek.' },
+    { q: 'Who climbed a tree to see Jesus?', a: 'Zacchaeus — a short tax collector who climbed a sycamore tree.' },
+  ];
+
+  const getRotatingIndex = (arr, intervalMs = 3600000) => {
+    const hour = Math.floor(Date.now() / intervalMs);
+    return hour % arr.length;
+  };
+
+  const currentVerse = bibleVerses[getRotatingIndex(bibleVerses)];
+  const currentFact = bibleFacts[getRotatingIndex(bibleFacts, 7200000)];
+  const currentTrivia = bibleTrivia[getRotatingIndex(bibleTrivia, 5400000)];
 
   // -- Messages --
   const handleSendMessage = async () => {
@@ -938,15 +1337,41 @@ export default function DashboardPage() {
     const data = await res.json();
     showToast(data.message, data.success ? 'success' : 'danger');
     if (data.success) loadAdminUsers();
+    setConfirmAction(null);
   };
 
   const handleDeleteUser = async (userId) => {
-    if (!confirm('Permanently delete this user? This cannot be undone.')) return;
     const res = await fetch(`/api/admin/users?id=${userId}`, { method: 'DELETE' });
     const data = await res.json();
     showToast(data.message, data.success ? 'success' : 'danger');
     if (data.success) loadAdminUsers();
+    setConfirmAction(null);
   };
+
+  const handleAdminResetPassword = async (userId) => {
+    if (!resetPwForm.newPassword || resetPwForm.newPassword.length < 8) {
+      showToast('Password must be at least 8 characters', 'danger'); return;
+    }
+    if (resetPwForm.newPassword !== resetPwForm.confirmPassword) {
+      showToast('Passwords do not match', 'danger'); return;
+    }
+    const res = await fetch('/api/admin/users', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: userId, action: 'reset-password', newPassword: resetPwForm.newPassword }) });
+    const data = await res.json();
+    showToast(data.message, data.success ? 'success' : 'danger');
+    if (data.success) { setShowResetPwModal(null); setResetPwForm({ newPassword: '', confirmPassword: '' }); }
+  };
+
+  const filteredAdminUsers = adminUsers.filter(u => {
+    const searchLower = userSearch.toLowerCase();
+    const matchesSearch = !userSearch || 
+      `${u.firstname} ${u.lastname}`.toLowerCase().includes(searchLower) ||
+      u.email?.toLowerCase().includes(searchLower) ||
+      u.member_id?.toLowerCase().includes(searchLower);
+    const matchesRole = !userFilterRole || u.role === userFilterRole;
+    const matchesMinistry = !userFilterMinistry || u.ministry === userFilterMinistry;
+    const matchesStatus = !userFilterStatus || u.status === userFilterStatus;
+    return matchesSearch && matchesRole && matchesMinistry && matchesStatus;
+  });
 
   // -- Admin: Ministry Management --
   const handleMinistrySubmit = async () => {
@@ -977,9 +1402,27 @@ export default function DashboardPage() {
   const isAdmin = userRole === 'Admin' || userRole === 'Super Admin';
 
   const handleLineupChange = (field, value) => setLineupForm((prev) => ({ ...prev, [field]: value }));
-  const handleBackupChange = (i, v) => { const b = [...lineupForm.backupSingers]; b[i] = v; setLineupForm((p) => ({ ...p, backupSingers: b })); };
-  const addBackupSinger = () => setLineupForm((p) => ({ ...p, backupSingers: [...p.backupSingers, ''] }));
-  const removeBackupSinger = (i) => setLineupForm((p) => ({ ...p, backupSingers: p.backupSingers.filter((_, idx) => idx !== i) }));
+  // Backup singer: add by picking from dropdown (chip-based)
+  const addBackupSingerByName = (name) => {
+    if (!name) return;
+    setLineupForm((p) => ({ ...p, backupSingers: [...p.backupSingers.filter(Boolean), name] }));
+  };
+  const removeBackupSinger = (name) => {
+    setLineupForm((p) => ({ ...p, backupSingers: p.backupSingers.filter((s) => s !== name) }));
+  };
+  // Get available backup singers (exclude already selected + exclude current song leader)
+  const getAvailableBackupSingers = () => {
+    const selected = lineupForm.backupSingers.filter(Boolean);
+    return backupSingerOptions.filter(b => !selected.includes(b.name) && b.name !== lineupForm.songLeader);
+  };
+  // When song leader changes, also remove them from backup singers if present
+  const handleSongLeaderChange = (value) => {
+    setLineupForm((prev) => ({
+      ...prev,
+      songLeader: value,
+      backupSingers: prev.backupSingers.filter(s => s !== value),
+    }));
+  };
   const addSong = (type) => setLineupForm((p) => ({ ...p, [type]: [...p[type], { title: '', link: '', lyrics: '', instructions: '' }] }));
   const removeSong = (type, i) => {
     setLineupForm((p) => ({ ...p, [type]: p[type].filter((_, idx) => idx !== i) }));
@@ -1087,6 +1530,90 @@ Respond ONLY with a valid JSON object (no markdown, no code fences, no extra tex
     }
   };
 
+  // Auto-fill song title from YouTube link using noembed + Groq AI
+  const autoFillSongTitle = async (type, i, link) => {
+    const fillKey = `${type}-${i}`;
+    try {
+      // Extract YouTube video ID
+      const ytMatch = link.match(/(?:youtube\.com\/(?:watch\?v=|embed\/|shorts\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/);
+      if (!ytMatch) return;
+
+      setSongAutoFillLoading(prev => ({ ...prev, [fillKey]: true }));
+
+      // Fetch video info from noembed
+      const oembedRes = await fetch(`https://noembed.com/embed?url=https://www.youtube.com/watch?v=${ytMatch[1]}`);
+      const oembedData = await oembedRes.json();
+      const videoTitle = oembedData.title || '';
+      const videoChannel = oembedData.author_name || '';
+
+      if (!videoTitle) {
+        setSongAutoFillLoading(prev => { const n = { ...prev }; delete n[fillKey]; return n; });
+        return;
+      }
+
+      // Use Groq AI to extract clean "SONG TITLE - ARTIST" from the YouTube title
+      const aiRes = await fetch(GROQ_API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${GROQ_API_KEY}` },
+        body: JSON.stringify({
+          model: 'meta-llama/llama-4-scout-17b-16e-instruct',
+          messages: [
+            {
+              role: 'system',
+              content: `You extract the song title and artist from YouTube video titles. You MUST respond with ONLY the formatted result — no explanation, no quotes, no extra text.
+
+Format: SONG TITLE - ARTIST
+
+Rules:
+- Output the song name first in UPPERCASE, then " - ", then the artist name in UPPERCASE
+- Remove any extra info like "(Official Video)", "(Lyrics)", "(Live)", "[Official Music Video]", "HD", "Audio", "ft.", "feat.", etc.
+- If the video title has "Artist - Song", reverse it to "SONG - ARTIST"
+- If you cannot determine the artist from the title, use the YouTube channel name as the artist
+- For worship/gospel songs, the artist is usually the worship leader or band name
+- Keep featured artist info like "ft." out of the result
+
+Examples:
+- Input: "Don Moen - Our Father | Live Worship Sessions" by DonMoenTV → OUR FATHER - DON MOEN
+- Input: "Friend of God - Israel Houghton (Official)" by Churchome → FRIEND OF GOD - ISRAEL HOUGHTON
+- Input: "Planetshakers - Joy" by Planetshakers → JOY - PLANETSHAKERS
+- Input: "Way Maker - Sinach [Official Video]" by Sinach → WAY MAKER - SINACH
+- Input: "What A Beautiful Name - Hillsong Worship" by Hillsong → WHAT A BEAUTIFUL NAME - HILLSONG WORSHIP`
+            },
+            {
+              role: 'user',
+              content: `YouTube title: "${videoTitle}"\nYouTube channel: "${videoChannel}"\n\nExtract the song title and artist.`
+            }
+          ],
+          temperature: 0.1,
+          max_tokens: 80,
+        }),
+      });
+
+      const aiData = await aiRes.json();
+      const aiContent = aiData?.choices?.[0]?.message?.content?.trim();
+
+      if (aiContent) {
+        // Clean up any quotes or extra whitespace
+        let cleanTitle = aiContent.replace(/^"|"$/g, '').replace(/^'|'$/g, '').trim();
+        // Only use if it looks like a valid "TITLE - ARTIST" format
+        if (cleanTitle.includes(' - ') && cleanTitle.length > 5 && cleanTitle.length < 120) {
+          // Check if title is still empty (user may have typed something while we were loading)
+          setLineupForm(prev => {
+            const songs = [...prev[type]];
+            if (!songs[i]?.title) {
+              songs[i] = { ...songs[i], title: cleanTitle };
+              // Trigger scan after auto-fill
+              setTimeout(() => scanSongContent(type, i, cleanTitle, link), 300);
+              return { ...prev, [type]: songs };
+            }
+            return prev;
+          });
+        }
+      }
+    } catch { /* silent — auto-fill is a nice-to-have */ }
+    setSongAutoFillLoading(prev => { const n = { ...prev }; delete n[fillKey]; return n; });
+  };
+
   // Debounced song change handler — triggers AI scan when title or link changes
   const handleSongChange = (type, i, field, value) => {
     const s = [...lineupForm[type]]; s[i] = { ...s[i], [field]: value }; setLineupForm((p) => ({ ...p, [type]: s }));
@@ -1097,6 +1624,13 @@ Respond ONLY with a valid JSON object (no markdown, no code fences, no extra tex
       if (songScanTimers.current[timerKey]) clearTimeout(songScanTimers.current[timerKey]);
 
       const updatedSong = { ...s[i], [field]: value };
+
+      // Auto-fill title from YouTube link when title is empty
+      if (field === 'link' && !updatedSong.title && value) {
+        const ytId = value.match(/(?:youtube\.com\/(?:watch\?v=|embed\/|shorts\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/);
+        if (ytId) autoFillSongTitle(type, i, value);
+      }
+
       // Trigger scan if there's a title OR a YouTube link
       if (updatedSong.title || updatedSong.link) {
         songScanTimers.current[timerKey] = setTimeout(() => {
@@ -1116,12 +1650,13 @@ Respond ONLY with a valid JSON object (no markdown, no code fences, no extra tex
   };
 
   const resetLineupForm = () => {
-    setLineupForm({ scheduleDate: '', practiceDate: '', songLeader: '', backupSingers: [''], slowSongs: [{ title: '', link: '', lyrics: '', instructions: '' }], fastSongs: [{ title: '', link: '', lyrics: '', instructions: '' }] });
+    setLineupForm({ scheduleDate: '', practiceDate: '', songLeader: '', backupSingers: [], slowSongs: [{ title: '', link: '', lyrics: '', instructions: '' }], fastSongs: [{ title: '', link: '', lyrics: '', instructions: '' }] });
     setLineupSelectedDate(null);
     setLineupView('calendar');
     setEditingLineup(null);
     setSongScanResults({});
     setLineupDetailPopup(null);
+    setLineupViewingAssignment(null);
   };
 
   const handleLineupDateSelect = (dateStr) => {
@@ -1129,12 +1664,11 @@ Respond ONLY with a valid JSON object (no markdown, no code fences, no extra tex
       // Admin: check if lineup already exists for this date
       const existing = scheduleData.find(s => s.scheduleDate === dateStr);
       if (existing) {
-        showToast('A lineup already exists for this date. Go to All Lineups to edit it.', 'warning');
+        showToast('A lineup already exists for this date. Switch to All Assignments to edit it.', 'warning');
         return;
       }
       setLineupSelectedDate(dateStr);
-      setLineupForm(prev => ({ ...prev, scheduleDate: dateStr, songLeader: '', backupSingers: [''] }));
-      setLineupView('form');
+      setLineupForm(prev => ({ ...prev, scheduleDate: dateStr, songLeader: '', backupSingers: [] }));
       loadBackupSingers();
       loadSongLeaders();
     } else {
@@ -1142,19 +1676,35 @@ Respond ONLY with a valid JSON object (no markdown, no code fences, no extra tex
       const existing = scheduleData.find(s => s.scheduleDate === dateStr);
       if (!existing) return;
       const myName = userData ? `${userData.firstname} ${userData.lastname}` : '';
-      if (existing.songLeader !== myName) {
+      const isMySubDate = isSubstituteDateForMe(dateStr);
+      // Check if this SL has an accepted sub for this date (they requested a sub and it was accepted)
+      const myAcceptedSub = getSubForDate(dateStr);
+      const isMySubbedDate = myAcceptedSub && myAcceptedSub.status === 'Accepted' && myAcceptedSub.requester_id === userData?.id;
+      if (isMySubbedDate) {
+        // Original SL who requested the sub → show read-only popup with sub's name
+        setLineupDetailPopup({
+          songLeader: existing.songLeader,
+          backupSingers: existing.backupSingers || [],
+          date: dateStr,
+          slowSongs: existing.slowSongs || [],
+          fastSongs: existing.fastSongs || [],
+          substitutedBy: myAcceptedSub.substitute_name,
+        });
+        return;
+      }
+      if (existing.songLeader !== myName && !isMySubDate) {
         // Show detail popup for this date
         setLineupDetailPopup({ songLeader: existing.songLeader, backupSingers: existing.backupSingers || [], date: dateStr, slowSongs: existing.slowSongs || [], fastSongs: existing.fastSongs || [] });
         return;
       }
-      // This is their assigned date — open form to add/edit songs
+      // This is their assigned date OR their sub date — open form to add/edit songs
       setLineupSelectedDate(dateStr);
       setEditingLineup(existing);
       setLineupForm({
         scheduleDate: existing.scheduleDate,
         practiceDate: existing.practiceDate || '',
         songLeader: existing.songLeader,
-        backupSingers: existing.backupSingers?.length ? existing.backupSingers : [''],
+        backupSingers: existing.backupSingers?.length ? [...existing.backupSingers] : [],
         slowSongs: existing.slowSongs?.length ? existing.slowSongs : [{ title: '', link: '', lyrics: '', instructions: '' }],
         fastSongs: existing.fastSongs?.length ? existing.fastSongs : [{ title: '', link: '', lyrics: '', instructions: '' }],
       });
@@ -1221,28 +1771,39 @@ Respond ONLY with a valid JSON object (no markdown, no code fences, no extra tex
     setEditingLineup(lineup);
     setLineupForm({
       scheduleDate: lineup.scheduleDate, practiceDate: lineup.practiceDate || '',
-      songLeader: lineup.songLeader, backupSingers: lineup.backupSingers?.length ? lineup.backupSingers : [''],
+      songLeader: lineup.songLeader || '', backupSingers: lineup.backupSingers?.length ? [...lineup.backupSingers] : [],
       slowSongs: lineup.slowSongs?.length ? lineup.slowSongs : [{ title: '', link: '', lyrics: '', instructions: '' }],
       fastSongs: lineup.fastSongs?.length ? lineup.fastSongs : [{ title: '', link: '', lyrics: '', instructions: '' }],
     });
-    setLineupView('form');
-    setActiveSection('create-lineup');
-    if (isAdmin) { loadBackupSingers(); loadSongLeaders(); }
+    setLineupSelectedDate(lineup.scheduleDate);
+    setLineupTab('assign');
+    if (isAdmin) {
+      setLineupView('calendar'); // admin uses split layout, not 'form' view
+      loadBackupSingers(); loadSongLeaders();
+    } else {
+      setLineupView('form');
+    }
   };
 
-  // Get lineups: admin sees all, song leader sees own
+  // Get lineups: admin sees all, song leader sees own + sub dates
   const getMyLineups = () => {
     if (isAdmin) {
       return scheduleData.sort((a, b) => new Date(b.scheduleDate) - new Date(a.scheduleDate));
     }
-    return scheduleData.filter(s => s.submittedBy === userData?.email || s.songLeader === `${userData?.firstname} ${userData?.lastname}`).sort((a, b) => new Date(b.scheduleDate) - new Date(a.scheduleDate));
+    const mySubDates = getAcceptedSubsAsSubstitute().map(s => s.schedule_date);
+    return scheduleData.filter(s => s.submittedBy === userData?.email || s.songLeader === `${userData?.firstname} ${userData?.lastname}` || mySubDates.includes(s.scheduleDate)).sort((a, b) => new Date(b.scheduleDate) - new Date(a.scheduleDate));
   };
 
   // Get dates where current user is assigned as Song Leader (for calendar highlight)
   const getAssignedDates = () => {
     if (!userData) return [];
     const myName = `${userData.firstname} ${userData.lastname}`;
-    return scheduleData.filter(s => s.songLeader === myName).map(s => s.scheduleDate);
+    // Include dates where I'm the song_leader AND dates where I was the original requester (now substituted)
+    const scheduledDates = scheduleData.filter(s => s.songLeader === myName).map(s => s.scheduleDate);
+    const subbedDates = subRequests
+      .filter(s => s.requester_id === userData.id && (s.status === 'Accepted' || s.status === 'Open for Sub' || s.status === 'Pending Admin'))
+      .map(s => s.schedule_date);
+    return [...new Set([...scheduledDates, ...subbedDates])];
   };
 
   // Get backup singers for a date where current user is assigned as Song Leader
@@ -1277,6 +1838,334 @@ Respond ONLY with a valid JSON object (no markdown, no code fences, no extra tex
   };
 
   // ============================================
+  // LINEUP EXCUSES
+  // ============================================
+  const loadLineupExcuses = async () => {
+    try {
+      const params = isAdmin ? '?all=true' : `?userId=${userData?.id}`;
+      const res = await fetch(`/api/lineup/excuses${params}`);
+      const data = await res.json();
+      if (data.success) setLineupExcuses(data.data || []);
+    } catch { /* silent */ }
+  };
+
+  const submitExcuse = async (overrideRoleType) => {
+    if (!excuseModalDate || !excuseReason.trim()) { showToast('Please select a date and provide a reason', 'warning'); return; }
+    setExcuseLoading(true);
+    try {
+      const userSubRole = userData?.sub_role || '';
+      const detectedRole = overrideRoleType || (userSubRole.includes('Song Leaders') ? 'Song Leader' : userSubRole.includes('Backup Singer') ? 'Backup Singer' : userSubRole.includes('Instrumentalist') ? 'Instrumentalist' : userSubRole.includes('Dancer') ? 'Dancer' : userSubRole.includes('Media') ? 'Media' : 'Song Leader');
+      const res = await fetch('/api/lineup/excuses', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: userData?.id,
+          userName: `${userData?.firstname} ${userData?.lastname}`,
+          excuseDate: excuseModalDate,
+          reason: excuseReason.trim(),
+          roleType: detectedRole,
+          profilePicture: userData?.profile_picture || null,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast('Excuse submitted! Waiting for admin approval.', 'success');
+        setExcuseModalDate(null);
+        setExcuseReason('');
+        loadLineupExcuses();
+      } else showToast(data.message, 'danger');
+    } catch (e) { showToast('Error: ' + e.message, 'danger'); } finally { setExcuseLoading(false); }
+  };
+
+  const cancelExcuse = async (excuseId) => {
+    try {
+      const res = await fetch(`/api/lineup/excuses?id=${excuseId}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (data.success) { showToast('Excuse cancelled', 'success'); loadLineupExcuses(); }
+      else showToast(data.message, 'danger');
+    } catch (e) { showToast('Error: ' + e.message, 'danger'); }
+  };
+
+  const reviewExcuse = async (excuseId, status) => {
+    try {
+      const res = await fetch('/api/lineup/excuses', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: excuseId, status, reviewedBy: userData?.email }),
+      });
+      const data = await res.json();
+      if (data.success) { showToast(`Excuse ${status.toLowerCase()}!`, 'success'); loadLineupExcuses(); }
+      else showToast(data.message, 'danger');
+    } catch (e) { showToast('Error: ' + e.message, 'danger'); }
+  };
+
+  // Check if a Song Leader is excused on a specific date (for admin dropdown graying)
+  const getExcuseForLeaderOnDate = (leaderName, dateStr) => {
+    return lineupExcuses.find(e => e.user_name === leaderName && e.excuse_date === dateStr && (e.status === 'Approved' || e.status === 'Pending'));
+  };
+
+  // Get current month's assigned dates that are missing songs (for Song Leader cards)
+  const getAssignedDatesMissingSongs = () => {
+    if (!userData) return [];
+    const myName = `${userData.firstname} ${userData.lastname}`;
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    // Dates where user has a sub request (don't nag about songs)
+    const subDates = subRequests
+      .filter(s => s.requester_id === userData.id && (s.status === 'Accepted' || s.status === 'Open for Sub' || s.status === 'Pending Admin'))
+      .map(s => s.schedule_date);
+    return scheduleData.filter(s => {
+      if (s.songLeader !== myName) return false;
+      if (new Date(s.scheduleDate + 'T00:00:00') < today) return false;
+      if (subDates.includes(s.scheduleDate)) return false;
+      const hasSongs = (s.slowSongs?.length > 0 && s.slowSongs.some(ss => ss.title)) || (s.fastSongs?.length > 0 && s.fastSongs.some(ss => ss.title));
+      return !hasSongs;
+    });
+  };
+
+  // Get my excuses for display
+  const getMyExcuses = () => {
+    if (!userData) return [];
+    return lineupExcuses.filter(e => e.user_id === userData.id).sort((a, b) => new Date(a.excuse_date) - new Date(b.excuse_date));
+  };
+
+  // Get pending excuses (for admin notification)
+  const getPendingExcuses = () => {
+    return lineupExcuses.filter(e => e.status === 'Pending').sort((a, b) => new Date(a.excuse_date) - new Date(b.excuse_date));
+  };
+
+  // Check if a date has an excuse for current user
+  const getMyExcuseForDate = (dateStr) => {
+    if (!userData) return null;
+    return lineupExcuses.find(e => e.user_id === userData.id && e.excuse_date === dateStr);
+  };
+
+  // ============================================
+  // LINEUP SUBSTITUTES
+  // ============================================
+  const loadSubRequests = async () => {
+    try {
+      // Both admin and Song Leaders need all subs: admin to review, SL to see open requests + their own
+      const res = await fetch('/api/lineup/substitutes?all=true');
+      const data = await res.json();
+      if (data.success) setSubRequests(data.data || []);
+    } catch { /* silent */ }
+  };
+
+  const submitSubRequest = async () => {
+    if (!subModalDate || !subReason.trim()) { showToast('Please provide a reason for the substitute request', 'warning'); return; }
+    setSubLoading(true);
+    try {
+      const schedule = scheduleData.find(s => s.scheduleDate === subModalDate);
+      const res = await fetch('/api/lineup/substitutes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          requesterId: userData?.id,
+          requesterName: `${userData?.firstname} ${userData?.lastname}`,
+          requesterProfilePicture: userData?.profile_picture || null,
+          scheduleId: schedule?.scheduleId || subModalScheduleId || null,
+          scheduleDate: subModalDate,
+          reason: subReason.trim(),
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast('Substitute request submitted! Waiting for admin approval.', 'success');
+        setSubModalDate(null); setSubModalScheduleId(null); setSubReason('');
+        loadSubRequests();
+      } else showToast(data.message, 'danger');
+    } catch (e) { showToast('Error: ' + e.message, 'danger'); } finally { setSubLoading(false); }
+  };
+
+  const adminReviewSub = async (subId, action) => {
+    try {
+      // Get all song leader IDs for notification
+      const slIds = songLeaderOptions.map(sl => sl.id);
+      const res = await fetch('/api/lineup/substitutes', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: subId,
+          action: action === 'approve' ? 'admin-approve' : 'admin-reject',
+          reviewedBy: userData?.email,
+          songLeaderIds: slIds,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) { showToast(data.message, 'success'); loadSubRequests(); }
+      else showToast(data.message, 'danger');
+    } catch (e) { showToast('Error: ' + e.message, 'danger'); }
+  };
+
+  const acceptSubRequest = async (subId) => {
+    try {
+      const res = await fetch('/api/lineup/substitutes', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: subId,
+          action: 'accept',
+          substituteId: userData?.id,
+          substituteName: `${userData?.firstname} ${userData?.lastname}`,
+          substituteProfilePicture: userData?.profile_picture || null,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) { showToast(data.message, 'success'); loadSubRequests(); loadScheduleData(); }
+      else showToast(data.message, 'danger');
+    } catch (e) { showToast('Error: ' + e.message, 'danger'); }
+  };
+
+  const cancelSubRequest = async (subId) => {
+    try {
+      const res = await fetch(`/api/lineup/substitutes?id=${subId}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (data.success) { showToast('Sub request cancelled.', 'success'); loadSubRequests(); }
+      else showToast(data.message, 'danger');
+    } catch (e) { showToast('Error: ' + e.message, 'danger'); }
+  };
+
+  const sendSubThankYou = async () => {
+    if (!subThankYouModal) return;
+    try {
+      const res = await fetch('/api/lineup/substitutes', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: subThankYouModal.subId,
+          action: 'thank-you',
+          thankYouMessage: subThankYouMessage.trim() || 'Thank you for substituting! God bless you! 🙏',
+        }),
+      });
+      const data = await res.json();
+      if (data.success) { showToast('Thank you message sent! 💛', 'success'); setSubThankYouModal(null); setSubThankYouMessage(''); loadSubRequests(); }
+      else showToast(data.message, 'danger');
+    } catch (e) { showToast('Error: ' + e.message, 'danger'); }
+  };
+
+  // Helpers for substitute data
+  const getSubForDate = (dateStr) => {
+    return subRequests.find(s => s.schedule_date === dateStr && s.requester_id === userData?.id && s.status !== 'Cancelled' && s.status !== 'Rejected');
+  };
+
+  const getMySubRequests = () => {
+    if (!userData) return [];
+    return subRequests.filter(s => s.requester_id === userData.id).sort((a, b) => new Date(a.schedule_date) - new Date(b.schedule_date));
+  };
+
+  const getOpenSubsForMe = () => {
+    if (!userData) return [];
+    return subRequests.filter(s => s.status === 'Open for Sub' && s.requester_id !== userData.id).sort((a, b) => new Date(a.schedule_date) - new Date(b.schedule_date));
+  };
+
+  const getPendingAdminSubs = () => {
+    return subRequests.filter(s => s.status === 'Pending Admin').sort((a, b) => new Date(a.schedule_date) - new Date(b.schedule_date));
+  };
+
+  const getAcceptedSubsAsSubstitute = () => {
+    if (!userData) return [];
+    return subRequests.filter(s => s.status === 'Accepted' && s.substitute_id === userData.id).sort((a, b) => new Date(a.schedule_date) - new Date(b.schedule_date));
+  };
+
+  const isSubstituteDateForMe = (dateStr) => {
+    if (!userData) return false;
+    return subRequests.some(s => s.schedule_date === dateStr && s.substitute_id === userData.id && s.status === 'Accepted');
+  };
+
+  const getAcceptedSubForDate = (dateStr) => {
+    return subRequests.find(s => s.schedule_date === dateStr && s.status === 'Accepted');
+  };
+
+  // Admin: get sub stats for PAW Logs
+  const getPawSubStats = () => {
+    const pending = subRequests.filter(s => s.status === 'Pending Admin').length;
+    const open = subRequests.filter(s => s.status === 'Open for Sub').length;
+    const accepted = subRequests.filter(s => s.status === 'Accepted').length;
+    const rejected = subRequests.filter(s => s.status === 'Rejected').length;
+    return { pending, open, accepted, rejected, total: subRequests.length };
+  };
+
+  // Admin: filtered subs for PAW Logs
+  const getFilteredPawSubs = () => {
+    let list = [...subRequests];
+    if (pawLogsFilter !== 'All') {
+      const filterMap = { 'Pending': 'Pending Admin', 'Approved': 'Accepted', 'Rejected': 'Rejected' };
+      const mapped = filterMap[pawLogsFilter];
+      if (mapped) list = list.filter(s => s.status === mapped);
+      else if (pawLogsFilter === 'Open') list = list.filter(s => s.status === 'Open for Sub');
+    }
+    if (pawLogsSearch.trim()) {
+      const q = pawLogsSearch.toLowerCase();
+      list = list.filter(s =>
+        s.requester_name?.toLowerCase().includes(q) ||
+        s.substitute_name?.toLowerCase().includes(q) ||
+        s.reason?.toLowerCase().includes(q) ||
+        s.schedule_date?.includes(q)
+      );
+    }
+    return list.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+  };
+
+  // ============================================
+  // PAW LOGS HELPERS
+  // ============================================
+  const PAW_ROLE_TYPES = ['Song Leader', 'Backup Singer', 'Instrumentalist', 'Dancer', 'Media'];
+  const PAW_ROLE_ICONS = { 'Song Leader': 'fa-microphone', 'Backup Singer': 'fa-users', 'Instrumentalist': 'fa-guitar', 'Dancer': 'fa-person-running', 'Media': 'fa-camera' };
+  const PAW_ROLE_COLORS = { 'Song Leader': '#926c15', 'Backup Singer': '#0069d9', 'Instrumentalist': '#673ab7', 'Dancer': '#e91e63', 'Media': '#00897b' };
+
+  const loadPawMembers = async () => {
+    try {
+      const res = await fetch('/api/lineup/singers?type=all-paw');
+      const data = await res.json();
+      if (data.success) setPawAllMembers(data.data || []);
+    } catch { /* silent */ }
+  };
+
+  // Filtered excuses for PAW Logs tab
+  const getFilteredPawExcuses = () => {
+    let list = [...lineupExcuses];
+    // Status filter
+    if (pawLogsFilter !== 'All') {
+      list = list.filter(e => e.status === pawLogsFilter);
+    }
+    // Role filter
+    if (pawLogsRoleFilter !== 'All') {
+      list = list.filter(e => (e.role_type || 'Song Leader') === pawLogsRoleFilter);
+    }
+    // Search filter
+    if (pawLogsSearch.trim()) {
+      const q = pawLogsSearch.toLowerCase();
+      list = list.filter(e =>
+        e.user_name?.toLowerCase().includes(q) ||
+        e.reason?.toLowerCase().includes(q) ||
+        e.excuse_date?.includes(q) ||
+        (e.role_type || 'Song Leader').toLowerCase().includes(q)
+      );
+    }
+    return list;
+  };
+
+  // Stats for PAW logs
+  const getPawExcuseStats = () => {
+    const pending = lineupExcuses.filter(e => e.status === 'Pending').length;
+    const approved = lineupExcuses.filter(e => e.status === 'Approved').length;
+    const rejected = lineupExcuses.filter(e => e.status === 'Rejected').length;
+    return { pending, approved, rejected, total: lineupExcuses.length };
+  };
+
+  // Get profile picture for a user from pawAllMembers or from the excuse itself
+  const getExcuseProfilePic = (excuse) => {
+    if (excuse.profile_picture) return excuse.profile_picture;
+    const member = pawAllMembers.find(m => m.id === excuse.user_id);
+    return member?.profile_picture || null;
+  };
+
+  // Get initials from name
+  const getInitials = (name) => {
+    if (!name) return '?';
+    return name.split(' ').map(n => n[0]).join('').toUpperCase();
+  };
+
   // BIBLE READER & CHAT (from original)
   // ============================================
   const loadBibleChapter = async (book, chapter, verse, version) => {
@@ -1449,12 +2338,110 @@ Respond ONLY with a valid JSON object (no markdown, no code fences, no extra tex
   // ============================================
   // PROFILE HANDLERS (from original)
   // ============================================
+  // Password strength calculator
+  const getPasswordStrength = (password) => {
+    if (!password) return { score: 0, label: '', color: '' };
+    let score = 0;
+    if (password.length >= 8) score++;
+    if (password.length >= 12) score++;
+    if (/[a-z]/.test(password) && /[A-Z]/.test(password)) score++;
+    if (/\d/.test(password)) score++;
+    if (/[^a-zA-Z0-9]/.test(password)) score++;
+    if (score <= 1) return { score: 1, label: 'Weak', color: '#dc3545' };
+    if (score <= 2) return { score: 2, label: 'Fair', color: '#fd7e14' };
+    if (score <= 3) return { score: 3, label: 'Good', color: '#ffc107' };
+    if (score <= 4) return { score: 4, label: 'Strong', color: '#28a745' };
+    return { score: 5, label: 'Very Strong', color: '#155724' };
+  };
+
+  // Image crop helper - creates cropped image from canvas
+  const getCroppedImg = async (imageSrc, pixelCrop) => {
+    const image = new Image();
+    image.crossOrigin = 'anonymous';
+    await new Promise((resolve, reject) => { image.onload = resolve; image.onerror = reject; image.src = imageSrc; });
+    const canvas = document.createElement('canvas');
+    canvas.width = pixelCrop.width;
+    canvas.height = pixelCrop.height;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(image, pixelCrop.x, pixelCrop.y, pixelCrop.width, pixelCrop.height, 0, 0, pixelCrop.width, pixelCrop.height);
+    return new Promise((resolve) => { canvas.toBlob((blob) => resolve(blob), 'image/jpeg', 0.92); });
+  };
+
+  // Smooth close crop modal with animation
+  const closeCropModal = () => {
+    setClosingCropModal(true);
+    setTimeout(() => { setShowCropModal(false); setCropImage(null); setClosingCropModal(false); }, 250);
+  };
+
+  // Close avatar menu when clicking outside
+  useEffect(() => {
+    if (!showAvatarMenu) return;
+    const handleClickOutside = (e) => {
+      if (avatarMenuRef.current && avatarMenuRef.current.contains(e.target)) return;
+      if (avatarWrapperRef.current && avatarWrapperRef.current.contains(e.target)) return;
+      setShowAvatarMenu(false);
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showAvatarMenu]);
+
+  // Close user action dropdown when clicking outside
+  useEffect(() => {
+    if (!userActionMenu) return;
+    const handleClickOutsideMenu = (e) => {
+      if (!e.target.closest('.um-dots-btn') && !e.target.closest('.um-dropdown')) {
+        setUserActionMenu(null);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutsideMenu);
+    return () => document.removeEventListener('mousedown', handleClickOutsideMenu);
+  }, [userActionMenu]);
+
+  // Handle profile picture file selection
+  const handleProfilePicSelect = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+    if (!allowedTypes.includes(file.type)) { showToast('Only JPEG, PNG, WebP, and GIF images are allowed', 'warning'); return; }
+    const reader = new FileReader();
+    reader.onload = () => { setCropImage(reader.result); setShowCropModal(true); setCrop({ x: 0, y: 0 }); setZoom(1); };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
+
+  // Handle cropped image upload
+  const handleCropComplete = async () => {
+    if (!croppedAreaPixels || !cropImage) return;
+    setUploadingPic(true);
+    try {
+      let blob = await getCroppedImg(cropImage, croppedAreaPixels);
+      // Compress if larger than 2MB
+      if (blob.size > 2 * 1024 * 1024) {
+        const imageCompression = (await import('browser-image-compression')).default;
+        const file = new File([blob], 'avatar.jpg', { type: 'image/jpeg' });
+        blob = await imageCompression(file, { maxSizeMB: 2, maxWidthOrHeight: 1024, useWebWorker: true });
+      }
+      const formData = new FormData();
+      formData.append('file', blob, 'avatar.jpg');
+      formData.append('email', userData.email);
+      const res = await fetch('/api/profile/upload-picture', { method: 'POST', body: formData });
+      const data = await res.json();
+      if (data.success) {
+        const updated = { ...userData, profile_picture: data.url + '?t=' + Date.now() };
+        setUserData(updated); sessionStorage.setItem('userData', JSON.stringify(updated));
+        showToast('Profile picture updated!', 'success');
+        closeCropModal();
+      } else showToast(data.message, 'danger');
+    } catch (e) { showToast('Error uploading: ' + e.message, 'danger'); }
+    finally { setUploadingPic(false); }
+  };
+
   const saveProfile = async () => {
     setProfileLoading(true);
     try {
-      const res = await fetch('/api/profile/update', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: userData.email, firstname: profileForm.firstname, lastname: profileForm.lastname }) });
+      const res = await fetch('/api/profile/update', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: userData.email, firstname: profileForm.firstname, lastname: profileForm.lastname, birthdate: profileForm.birthdate, life_verse: profileForm.life_verse }) });
       const data = await res.json();
-      if (data.success) { const updated = { ...userData, firstname: profileForm.firstname, lastname: profileForm.lastname }; setUserData(updated); sessionStorage.setItem('userData', JSON.stringify(updated)); showToast('Profile updated!', 'success'); }
+      if (data.success) { const updated = { ...userData, firstname: profileForm.firstname, lastname: profileForm.lastname, birthdate: profileForm.birthdate, life_verse: profileForm.life_verse }; setUserData(updated); sessionStorage.setItem('userData', JSON.stringify(updated)); showToast('Profile updated!', 'success'); }
       else showToast(data.message, 'danger');
     } catch (e) { showToast('Error: ' + e.message, 'danger'); } finally { setProfileLoading(false); }
   };
@@ -1464,7 +2451,7 @@ Respond ONLY with a valid JSON object (no markdown, no code fences, no extra tex
     if (passwordForm.newPassword.length < 8) { showToast('Password must be at least 8 characters', 'warning'); return; }
     setProfileLoading(true);
     try {
-      const verifyRes = await fetch('/api/profile/verify-password', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: userData.email, password: passwordForm.currentPassword }) });
+      const verifyRes = await fetch('/api/profile/verify-password', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: userData.email, currentPassword: passwordForm.currentPassword }) });
       const verifyData = await verifyRes.json();
       if (!verifyData.success) { showToast('Current password is incorrect', 'danger'); setProfileLoading(false); return; }
 
@@ -1629,7 +2616,10 @@ Respond ONLY with a valid JSON object (no markdown, no code fences, no extra tex
             </div>
             <div className="schedule-modal-body">
               <p><strong>Date:</strong> {formatDate(selectedSchedule.scheduleDate)}</p>
-              <p><strong>Song Leader:</strong> {selectedSchedule.songLeader}</p>
+              <p><strong>{selectedSchedule.hasSubstitute ? 'Song Leader (Substitute):' : 'Song Leader:'}</strong> {selectedSchedule.songLeader}</p>
+              {selectedSchedule.hasSubstitute && selectedSchedule.originalSongLeader && (
+                <p><strong>Song Leader:</strong> <span className="paw-grayed-out">{selectedSchedule.originalSongLeader}</span></p>
+              )}
               {selectedSchedule.backupSingers?.length > 0 && <p><strong>Backup:</strong> {selectedSchedule.backupSingers.join(', ')}</p>}
               {selectedSchedule.practiceDate && <p><strong>Practice:</strong> {formatDate(selectedSchedule.practiceDate)}</p>}
               {selectedSchedule.slowSongs?.length > 0 && (
@@ -1675,8 +2665,8 @@ Respond ONLY with a valid JSON object (no markdown, no code fences, no extra tex
                 <img src="/assets/LOGO.png" alt="JSCI Logo" />
               </div>
               <div className="brand-text">
-                <span className="brand-name">JOYFUL SOUND</span>
-                <span className="brand-sub">CHURCH INTERNATIONAL</span>
+                <span className="brand-name">JOYFUL SOUND CHURCH</span>
+                <span className="brand-sub">INTERNATIONAL</span>
               </div>
             </div>
           </div>
@@ -1723,9 +2713,8 @@ Respond ONLY with a valid JSON object (no markdown, no code fences, no extra tex
               </div>
               <div className="sidebar-user-info">
                 <div className="sidebar-user-name">{userData.firstname} {userData.lastname}</div>
-                <div className="sidebar-user-email">{userData.email}</div>
+                <div className="sidebar-role-pill">{userRole}</div>
               </div>
-              <div className="sidebar-role-pill">{userRole}</div>
             </div>
 
             <button className="logout-btn" onClick={() => setShowLogoutModal(true)}>
@@ -2010,17 +2999,39 @@ Respond ONLY with a valid JSON object (no markdown, no code fences, no extra tex
             <h3 style={{ margin: '20px 0 10px', color: 'var(--primary)' }}><i className="fas fa-clock"></i> Upcoming Services</h3>
             <div className="schedule-cards">
               {scheduleData.filter((s) => new Date(s.scheduleDate) >= new Date()).sort((a, b) => new Date(a.scheduleDate) - new Date(b.scheduleDate)).slice(0, 6).map((s, i) => (
-                <div key={i} className="upcoming-schedule-card" onClick={() => setSelectedSchedule(s)}>
+                <div key={i} className={`upcoming-schedule-card${s.hasSubstitute ? ' has-sub' : ''}`} onClick={() => setSelectedSchedule(s)}>
                   <div className="schedule-card-date">{formatDate(s.scheduleDate)}</div>
-                  <div className="schedule-card-leader"><i className="fas fa-microphone"></i> {s.songLeader}</div>
+                  <div className="schedule-card-leader"><i className="fas fa-microphone"></i> {s.hasSubstitute ? 'Song Leader (Substitute): ' : ''}{s.songLeader}</div>
+                  {s.hasSubstitute && s.originalSongLeader && (
+                    <div className="schedule-card-original"><i className="fas fa-user"></i> Song Leader: <span className="paw-grayed-out">{s.originalSongLeader}</span></div>
+                  )}
                   <div className="schedule-card-songs">{s.slowSongs?.length || 0} slow • {s.fastSongs?.length || 0} fast songs</div>
                 </div>
               ))}
               {scheduleData.filter((s) => new Date(s.scheduleDate) >= new Date()).length === 0 && <p style={{ color: '#6c757d' }}>No upcoming schedules found.</p>}
             </div>
             {todaysBirthdays.length > 0 && (
-              <div className="birthday-section"><h3><i className="fas fa-birthday-cake"></i> Birthday Today! 🎂</h3>
-                {todaysBirthdays.map((b, i) => (<div key={i} className="birthday-card"><span className="birthday-name">{b.fullName}</span><span className="birthday-ministry">{b.ministry}</span></div>))}
+              <div className="birthday-section-v2">
+                <h3 className="birthday-section-title"><i className="fas fa-birthday-cake"></i> Birthday Today! 🎂</h3>
+                <div className="birthday-cards-grid">
+                  {todaysBirthdays.map((b, i) => (
+                    <div key={i} className="birthday-card-v2">
+                      <div className="birthday-card-confetti"></div>
+                      <div className="birthday-card-avatar">
+                        {b.profile_picture ? (
+                          <img src={b.profile_picture} alt={b.fullName} referrerPolicy="no-referrer" />
+                        ) : (
+                          <span className="birthday-card-initials">{b.firstname?.[0]}{b.lastname?.[0]}</span>
+                        )}
+                        <span className="birthday-cake-icon">🎂</span>
+                      </div>
+                      <div className="birthday-card-info">
+                        <span className="birthday-card-name">{b.fullName}</span>
+                        <span className="birthday-card-ministry"><i className="fas fa-church"></i> {b.ministry || 'Member'}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
           </section>
@@ -2105,8 +3116,27 @@ Respond ONLY with a valid JSON object (no markdown, no code fences, no extra tex
 
             {/* Birthday Announcements */}
             {todaysBirthdays.length > 0 && (
-              <div className="birthday-section"><h3><i className="fas fa-birthday-cake"></i> Happy Birthday! 🎂</h3>
-                {todaysBirthdays.map((b, i) => (<div key={i} className="birthday-card"><span className="birthday-name">{b.fullName}</span> — <span className="birthday-ministry">{b.ministry}</span></div>))}
+              <div className="birthday-section-v2">
+                <h3 className="birthday-section-title"><i className="fas fa-birthday-cake"></i> Happy Birthday! 🎂</h3>
+                <div className="birthday-cards-grid">
+                  {todaysBirthdays.map((b, i) => (
+                    <div key={i} className="birthday-card-v2 birthday-today">
+                      <div className="birthday-card-confetti"></div>
+                      <div className="birthday-card-avatar">
+                        {b.profile_picture ? (
+                          <img src={b.profile_picture} alt={b.fullName} referrerPolicy="no-referrer" />
+                        ) : (
+                          <span className="birthday-card-initials">{b.firstname?.[0]}{b.lastname?.[0]}</span>
+                        )}
+                        <span className="birthday-cake-icon">🎂</span>
+                      </div>
+                      <div className="birthday-card-info">
+                        <span className="birthday-card-name">{b.fullName}</span>
+                        <span className="birthday-card-ministry"><i className="fas fa-church"></i> {b.ministry || 'Member'}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
 
@@ -2127,10 +3157,27 @@ Respond ONLY with a valid JSON object (no markdown, no code fences, no extra tex
                 </div>
               </div>
             ))}
-            {announcements.length === 0 && upcomingBirthdays.length > 0 && (
-              <div className="birthday-section" style={{ marginTop: 20 }}>
-                <h3><i className="fas fa-calendar-alt"></i> Upcoming Birthdays (Next 30 Days)</h3>
-                {upcomingBirthdays.map((b, i) => (<div key={i} className="birthday-card"><span className="birthday-name">{b.fullName}</span> — {new Date(b.birthdate).toLocaleDateString('en-US', { month: 'long', day: 'numeric' })}</div>))}
+            {upcomingBirthdays.length > 0 && (
+              <div className="birthday-section-v2" style={{ marginTop: 20 }}>
+                <h3 className="birthday-section-title"><i className="fas fa-calendar-alt"></i> Upcoming Birthdays (Next 30 Days)</h3>
+                <div className="birthday-cards-grid">
+                  {upcomingBirthdays.map((b, i) => (
+                    <div key={i} className="birthday-card-v2 birthday-upcoming">
+                      <div className="birthday-card-avatar">
+                        {b.profile_picture ? (
+                          <img src={b.profile_picture} alt={b.fullName} referrerPolicy="no-referrer" />
+                        ) : (
+                          <span className="birthday-card-initials">{b.firstname?.[0]}{b.lastname?.[0]}</span>
+                        )}
+                      </div>
+                      <div className="birthday-card-info">
+                        <span className="birthday-card-name">{b.fullName}</span>
+                        <span className="birthday-card-date"><i className="fas fa-calendar"></i> {new Date(b.birthdate).toLocaleDateString('en-US', { month: 'long', day: 'numeric' })}</span>
+                        {b.ministry && <span className="birthday-card-ministry"><i className="fas fa-church"></i> {b.ministry}</span>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
           </section>
@@ -2182,57 +3229,230 @@ Respond ONLY with a valid JSON object (no markdown, no code fences, no extra tex
           <section className={`content-section ${activeSection === 'community-hub' ? 'active' : ''}`}>
             <h2 className="section-title">Community Hub</h2>
 
-            {canManage(MODULES.CREATE_POSTS) && (
-              <div style={{ padding: 20, background: 'var(--bg-card)', borderRadius: 12, marginBottom: 20, boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }}>
-                <textarea className="form-control" style={{ padding: '12px 15px', marginBottom: 10 }} placeholder="Share something with the community..." rows={3} value={newPostContent} onChange={(e) => setNewPostContent(e.target.value)} />
-                <button className="btn-primary" onClick={handleCreatePost} disabled={!newPostContent.trim()}>
-                  <i className="fas fa-paper-plane"></i> Post
-                </button>
-              </div>
-            )}
-
-            {communityPosts.map((post) => (
-              <div key={post.id} style={{ padding: 20, background: 'var(--bg-card)', borderRadius: 12, marginBottom: 12, boxShadow: '0 2px 6px rgba(0,0,0,0.08)', borderLeft: post.is_pinned ? '4px solid var(--accent)' : 'none' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                  <div>
-                    <strong style={{ color: 'var(--primary)' }}>{post.author_name}</strong>
-                    {post.is_pinned && <i className="fas fa-thumbtack" style={{ marginLeft: 8, color: 'var(--accent)' }}></i>}
-                    <small style={{ display: 'block', color: '#adb5bd' }}>{formatDateTime(post.created_at)}</small>
-                  </div>
-                  {canManage(MODULES.PIN_POSTS) && (
-                    <button className="btn-small" onClick={() => handlePinPost(post.id, post.is_pinned)} title={post.is_pinned ? 'Unpin' : 'Pin'}>
-                      <i className="fas fa-thumbtack"></i>
-                    </button>
-                  )}
-                </div>
-                <p style={{ margin: '12px 0', lineHeight: 1.6 }}>{post.content}</p>
-                <div style={{ display: 'flex', gap: 15, alignItems: 'center', color: '#6c757d', fontSize: '0.9rem' }}>
-                  <button style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', display: 'flex', alignItems: 'center', gap: 5 }} onClick={() => handleLikePost(post.id)}>
-                    <i className="fas fa-heart"></i> {post.likeCount || 0}
-                  </button>
-                  <button style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', display: 'flex', alignItems: 'center', gap: 5 }} onClick={() => { setShowComments((p) => ({ ...p, [post.id]: !p[post.id] })); if (!postComments[post.id]) loadPostComments(post.id); }}>
-                    <i className="fas fa-comment"></i> {post.commentCount || 0}
-                  </button>
-                </div>
-
-                {showComments[post.id] && (
-                  <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid #eee' }}>
-                    {(postComments[post.id] || []).map((c) => (
-                      <div key={c.id} style={{ marginBottom: 8, paddingLeft: 12, borderLeft: '2px solid var(--accent)' }}>
-                        <strong style={{ fontSize: '0.85rem' }}>{c.author_name}</strong>
-                        <p style={{ margin: '4px 0', fontSize: '0.9rem' }}>{c.content}</p>
-                        <small style={{ color: '#adb5bd' }}>{formatDateTime(c.created_at)}</small>
+            <div className="community-layout">
+              {/* Main feed */}
+              <div className="community-feed">
+                {canManage(MODULES.CREATE_POSTS) && (
+                  <div className="community-compose">
+                    <div className="community-compose-avatar">
+                      {userData.profile_picture ? (
+                        <img src={userData.profile_picture} alt="" referrerPolicy="no-referrer" />
+                      ) : (
+                        <span>{initials}</span>
+                      )}
+                    </div>
+                    <div className="community-compose-body">
+                      <textarea className="community-compose-input" placeholder="Share something with the community..." rows={3} value={newPostContent} onChange={(e) => setNewPostContent(e.target.value)} />
+                      <div className="community-compose-actions">
+                        <button className="btn-primary community-post-btn" onClick={handleCreatePost} disabled={!newPostContent.trim()}>
+                          <i className="fas fa-paper-plane"></i> Post
+                        </button>
                       </div>
-                    ))}
-                    <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-                      <input className="form-control" style={{ padding: '8px 12px', flex: 1 }} placeholder="Write a comment..." value={commentInputs[post.id] || ''} onChange={(e) => setCommentInputs((p) => ({ ...p, [post.id]: e.target.value }))} onKeyDown={(e) => { if (e.key === 'Enter') handleAddComment(post.id); }} />
-                      <button className="btn-primary" style={{ padding: '8px 16px' }} onClick={() => handleAddComment(post.id)}>Send</button>
                     </div>
                   </div>
                 )}
+
+                {communityPosts.length === 0 && (
+                  <div className="community-empty">
+                    <i className="fas fa-comments"></i>
+                    <p>No posts yet. Be the first to share!</p>
+                  </div>
+                )}
+
+                {communityPosts.map((post, idx) => (
+                  <div key={post.id} className={`community-post-card${post.is_pinned ? ' pinned' : ''}${deletingPost === post.id ? ' deleting' : ''}`} style={{ animationDelay: `${idx * 0.05}s` }}>
+                    {post.is_pinned && <div className="community-pin-badge"><i className="fas fa-thumbtack"></i> Pinned</div>}
+                    <div className="community-post-header">
+                      <div className="community-post-author-avatar" onClick={() => handleViewProfile(post.author_id, post.author_name, post.author_picture)} style={{ cursor: 'pointer' }} title="View profile">
+                        {post.author_picture ? (
+                          <img src={post.author_picture} alt="" referrerPolicy="no-referrer" />
+                        ) : (
+                          <span>{post.author_name?.split(' ').map(n => n[0]).join('').slice(0,2)}</span>
+                        )}
+                      </div>
+                      <div className="community-post-author-info">
+                        <span className="community-post-author-name" onClick={() => handleViewProfile(post.author_id, post.author_name, post.author_picture)} style={{ cursor: 'pointer' }}>{post.author_name}</span>
+                        <span className="community-post-time">{formatDateTime(post.created_at)}</span>
+                      </div>
+                      <div className="community-post-actions-top">
+                        {(canManage(MODULES.PIN_POSTS) || userData?.id === post.author_id) && (
+                          <div className="community-post-menu-wrapper">
+                            <button className="community-action-btn" onClick={() => setPostMenuOpen(postMenuOpen === post.id ? null : post.id)} title="More options">
+                              <i className="fas fa-ellipsis-h"></i>
+                            </button>
+                            {postMenuOpen === post.id && (
+                              <div className="community-dropdown-menu" onClick={() => setPostMenuOpen(null)}>
+                                {canManage(MODULES.PIN_POSTS) && (
+                                  <button className="community-dropdown-item" onClick={() => handlePinPost(post.id, post.is_pinned)}>
+                                    <i className={`fas fa-thumbtack`}></i> {post.is_pinned ? 'Unpin' : 'Pin Post'}
+                                  </button>
+                                )}
+                                {userData?.id === post.author_id && (
+                                  <>
+                                    <button className="community-dropdown-item" onClick={() => { setEditingPost(post.id); setEditPostContent(post.content); }}>
+                                      <i className="fas fa-edit"></i> Edit Post
+                                    </button>
+                                    <button className="community-dropdown-item delete" onClick={() => handleDeletePost(post.id)}>
+                                      <i className="fas fa-trash-alt"></i> Delete Post
+                                    </button>
+                                  </>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {editingPost === post.id ? (
+                      <div className="community-edit-box">
+                        <textarea className="community-compose-input" value={editPostContent} onChange={(e) => setEditPostContent(e.target.value)} rows={3} />
+                        <div className="community-edit-actions">
+                          <button className="btn-primary btn-small" onClick={() => handleEditPost(post.id)}><i className="fas fa-check"></i> Save</button>
+                          <button className="btn-secondary btn-small" onClick={() => { setEditingPost(null); setEditPostContent(''); }}>Cancel</button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="community-post-content">{post.content}</div>
+                    )}
+
+                    <div className="community-post-footer">
+                      <button className={`community-react-btn${post.liked ? ' liked' : ''}${likeAnimating[post.id] ? ' animating' : ''}`} onClick={() => handleLikePost(post.id)}>
+                        <i className={`${post.liked ? 'fas' : 'far'} fa-heart`}></i>
+                        <span>{post.likeCount || 0}</span>
+                      </button>
+                      <button className={`community-react-btn${showComments[post.id] ? ' active' : ''}`} onClick={() => { setShowComments((p) => ({ ...p, [post.id]: !p[post.id] })); if (!postComments[post.id]) loadPostComments(post.id); }}>
+                        <i className="far fa-comment"></i>
+                        <span>{post.commentCount || 0}</span>
+                      </button>
+                    </div>
+
+                    <div className={`community-comments-section${showComments[post.id] ? ' open' : ''}`}>
+                      <div className="community-comments-inner">
+                        {(postComments[post.id] || []).map((c) => (
+                          <div key={c.id} className="community-comment">
+                            <div className="community-comment-avatar" onClick={() => handleViewProfile(c.author_id, c.author_name, c.author_picture)} style={{ cursor: 'pointer' }}>
+                              {c.author_picture ? (
+                                <img src={c.author_picture} alt="" referrerPolicy="no-referrer" style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} />
+                              ) : (
+                                <span>{c.author_name?.split(' ').map(n => n[0]).join('').slice(0,2)}</span>
+                              )}
+                            </div>
+                            <div className="community-comment-body">
+                              {editingComment === c.id ? (
+                                <div className="community-comment-edit-box">
+                                  <input className="community-comment-input" value={editCommentContent} onChange={(e) => setEditCommentContent(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') handleEditComment(c.id, post.id); }} />
+                                  <div className="community-edit-actions" style={{ marginTop: 6 }}>
+                                    <button className="btn-primary btn-small" onClick={() => handleEditComment(c.id, post.id)}><i className="fas fa-check"></i></button>
+                                    <button className="btn-secondary btn-small" onClick={() => { setEditingComment(null); setEditCommentContent(''); }}>Cancel</button>
+                                  </div>
+                                </div>
+                              ) : (
+                                <div className="community-comment-bubble">
+                                  <strong className="community-comment-name" onClick={() => handleViewProfile(c.author_id, c.author_name, c.author_picture)} style={{ cursor: 'pointer' }}>{c.author_name}</strong>
+                                  <p className="community-comment-text">{c.content}</p>
+                                </div>
+                              )}
+                              <div className="community-comment-actions-row">
+                                <span className="community-comment-time">{formatDateTime(c.created_at)}</span>
+                                <button className={`community-comment-like-btn${c.liked ? ' liked' : ''}${commentLikeAnimating[c.id] ? ' animating' : ''}`} onClick={() => handleLikeComment(c.id, post.id)}>
+                                  <i className={`${c.liked ? 'fas' : 'far'} fa-heart`}></i> {c.likeCount > 0 && <span>{c.likeCount}</span>}
+                                </button>
+                                {userData?.id === c.author_id && (
+                                  <div className="community-comment-own-actions">
+                                    <button className="community-comment-action-btn" onClick={() => { setEditingComment(c.id); setEditCommentContent(c.content); setCommentMenuOpen(null); }} title="Edit"><i className="fas fa-edit"></i></button>
+                                    <button className="community-comment-action-btn delete" onClick={() => handleDeleteComment(c.id, post.id)} title="Delete"><i className="fas fa-trash-alt"></i></button>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                        {(postComments[post.id] || []).length === 0 && <div className="community-no-comments">No comments yet</div>}
+                        <div className="community-comment-input-row">
+                          <input className="community-comment-input" placeholder="Write a comment..." value={commentInputs[post.id] || ''} onChange={(e) => setCommentInputs((p) => ({ ...p, [post.id]: e.target.value }))} onKeyDown={(e) => { if (e.key === 'Enter') handleAddComment(post.id); }} />
+                          <button className="community-comment-send" onClick={() => handleAddComment(post.id)} disabled={!commentInputs[post.id]?.trim()}>
+                            <i className="fas fa-paper-plane"></i>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
               </div>
-            ))}
-            {communityPosts.length === 0 && <p style={{ color: '#6c757d' }}>No posts yet. Be the first to share!</p>}
+
+              {/* Sidebar cards */}
+              <div className="community-sidebar">
+                {/* Verse of the Hour */}
+                <div className="community-card verse-card">
+                  <div className="community-card-header">
+                    <div className="community-card-icon verse-icon"><i className="fas fa-bible"></i></div>
+                    <h3>Verse of the Hour</h3>
+                  </div>
+                  <div className="community-card-body">
+                    <p className="verse-text">&ldquo;{currentVerse.text}&rdquo;</p>
+                    <span className="verse-ref">— {currentVerse.ref}</span>
+                  </div>
+                  <div className="community-card-shimmer"></div>
+                </div>
+
+                {/* Fun Fact */}
+                <div className="community-card fact-card">
+                  <div className="community-card-header">
+                    <div className="community-card-icon fact-icon"><i className="fas fa-lightbulb"></i></div>
+                    <h3>Bible Fun Fact</h3>
+                  </div>
+                  <div className="community-card-body">
+                    <span className="fact-emoji">{currentFact.emoji}</span>
+                    <p className="fact-text">{currentFact.fact}</p>
+                  </div>
+                  <div className="community-card-shimmer"></div>
+                </div>
+
+                {/* Trivia */}
+                <div className="community-card trivia-card">
+                  <div className="community-card-header">
+                    <div className="community-card-icon trivia-icon"><i className="fas fa-question-circle"></i></div>
+                    <h3>Bible Trivia</h3>
+                  </div>
+                  <div className="community-card-body">
+                    <p className="trivia-question"><i className="fas fa-question"></i> {currentTrivia.q}</p>
+                    <details className="trivia-answer-toggle">
+                      <summary>Reveal Answer</summary>
+                      <p className="trivia-answer">{currentTrivia.a}</p>
+                    </details>
+                  </div>
+                  <div className="community-card-shimmer"></div>
+                </div>
+              </div>
+            </div>
+
+            {/* View Profile Modal */}
+            {viewingProfile && (
+              <div className="community-profile-modal-overlay" onClick={() => setViewingProfile(null)}>
+                <div className="community-profile-modal" onClick={(e) => e.stopPropagation()}>
+                  <button className="community-profile-modal-close" onClick={() => setViewingProfile(null)}><i className="fas fa-times"></i></button>
+                  <div className="community-profile-modal-banner"></div>
+                  <div className="community-profile-modal-avatar">
+                    {viewingProfile.profile_picture ? (
+                      <img src={viewingProfile.profile_picture} alt="" referrerPolicy="no-referrer" />
+                    ) : (
+                      <span>{viewingProfile.author_name?.split(' ').map(n => n[0]).join('').slice(0,2)}</span>
+                    )}
+                  </div>
+                  <div className="community-profile-modal-info">
+                    <h3>{viewingProfile.author_name || `${viewingProfile.firstname} ${viewingProfile.lastname}`}</h3>
+                    <span className="community-profile-role">{viewingProfile.role || viewingProfile.sub_role || 'Member'}</span>
+                    {viewingProfile.ministry && <span className="community-profile-ministry"><i className="fas fa-church"></i> {viewingProfile.ministry}</span>}
+                    {viewingProfile.life_verse && (
+                      <div className="community-profile-verse">
+                        <i className="fas fa-bible"></i> &ldquo;{viewingProfile.life_verse}&rdquo;
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
           </section>
 
           {/* ========== MESSAGES ========== */}
@@ -2419,11 +3639,21 @@ Respond ONLY with a valid JSON object (no markdown, no code fences, no extra tex
                       {ALL_MINISTRIES.map((m) => <option key={m} value={m}>{m}</option>)}
                     </select>
                   </div>
-                  <div className="form-group"><label>Ministry Role</label>
-                    <select className="form-select" style={{ padding: '10px 15px' }} value={userForm.sub_role} onChange={(e) => setUserForm({ ...userForm, sub_role: e.target.value })} disabled={!userForm.ministry || !MINISTRY_SUB_ROLES[userForm.ministry]}>
-                      <option value="">— Select Role —</option>
-                      {(MINISTRY_SUB_ROLES[userForm.ministry] || []).map((sr) => <option key={sr} value={sr}>{sr}</option>)}
-                    </select>
+                  <div className="form-group"><label>Ministry Roles</label>
+                    <div className="um-role-tags-wrapper">
+                      <div className="um-role-tags">
+                        {(userForm.sub_role ? userForm.sub_role.split(',').map(s => s.trim()).filter(Boolean) : []).map((role, i) => (
+                          <span key={i} className="um-role-tag">{role}<button type="button" onClick={() => { const roles = userForm.sub_role.split(',').map(s => s.trim()).filter(Boolean); roles.splice(i, 1); setUserForm({ ...userForm, sub_role: roles.join(', ') }); }}>&times;</button></span>
+                        ))}
+                      </div>
+                      <div className="um-role-add-row">
+                        <input className="form-control um-role-add-input" list="create-sub-roles" placeholder="Type or select a role..." value={newSubRoleInput} onChange={(e) => setNewSubRoleInput(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); const val = newSubRoleInput.trim(); if (val) { const current = userForm.sub_role ? userForm.sub_role.split(',').map(s => s.trim()).filter(Boolean) : []; if (!current.includes(val)) { setUserForm({ ...userForm, sub_role: [...current, val].join(', ') }); } setNewSubRoleInput(''); } } }} />
+                        <datalist id="create-sub-roles">
+                          {(MINISTRY_SUB_ROLES[userForm.ministry] || []).filter(sr => !(userForm.sub_role || '').split(',').map(s => s.trim()).includes(sr)).map((sr) => <option key={sr} value={sr} />)}
+                        </datalist>
+                        <button type="button" className="um-role-add-btn" onClick={() => { const val = newSubRoleInput.trim(); if (val) { const current = userForm.sub_role ? userForm.sub_role.split(',').map(s => s.trim()).filter(Boolean) : []; if (!current.includes(val)) { setUserForm({ ...userForm, sub_role: [...current, val].join(', ') }); } setNewSubRoleInput(''); } }}><i className="fas fa-plus"></i> Add</button>
+                      </div>
+                    </div>
                   </div>
                 </div>
                 <div className="form-group" style={{ marginBottom: 15 }}><label>System Role</label>
@@ -2459,11 +3689,21 @@ Respond ONLY with a valid JSON object (no markdown, no code fences, no extra tex
                           {ALL_MINISTRIES.map((m) => <option key={m} value={m}>{m}</option>)}
                         </select>
                       </div>
-                      <div className="form-group"><label>Ministry Role</label>
-                        <select className="form-select" style={{ padding: '10px 15px' }} value={userForm.sub_role} onChange={(e) => setUserForm({ ...userForm, sub_role: e.target.value })} disabled={!userForm.ministry || !MINISTRY_SUB_ROLES[userForm.ministry]}>
-                          <option value="">— Select Role —</option>
-                          {(MINISTRY_SUB_ROLES[userForm.ministry] || []).map((sr) => <option key={sr} value={sr}>{sr}</option>)}
-                        </select>
+                      <div className="form-group"><label>Ministry Roles</label>
+                        <div className="um-role-tags-wrapper">
+                          <div className="um-role-tags">
+                            {(userForm.sub_role ? userForm.sub_role.split(',').map(s => s.trim()).filter(Boolean) : []).map((role, i) => (
+                              <span key={i} className="um-role-tag">{role}<button type="button" onClick={() => { const roles = userForm.sub_role.split(',').map(s => s.trim()).filter(Boolean); roles.splice(i, 1); setUserForm({ ...userForm, sub_role: roles.join(', ') }); }}>&times;</button></span>
+                            ))}
+                          </div>
+                          <div className="um-role-add-row">
+                            <input className="form-control um-role-add-input" list="edit-sub-roles" placeholder="Type or select a role..." value={newSubRoleInput} onChange={(e) => setNewSubRoleInput(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); const val = newSubRoleInput.trim(); if (val) { const current = userForm.sub_role ? userForm.sub_role.split(',').map(s => s.trim()).filter(Boolean) : []; if (!current.includes(val)) { setUserForm({ ...userForm, sub_role: [...current, val].join(', ') }); } setNewSubRoleInput(''); } } }} />
+                            <datalist id="edit-sub-roles">
+                              {(MINISTRY_SUB_ROLES[userForm.ministry] || []).filter(sr => !(userForm.sub_role || '').split(',').map(s => s.trim()).includes(sr)).map((sr) => <option key={sr} value={sr} />)}
+                            </datalist>
+                            <button type="button" className="um-role-add-btn" onClick={() => { const val = newSubRoleInput.trim(); if (val) { const current = userForm.sub_role ? userForm.sub_role.split(',').map(s => s.trim()).filter(Boolean) : []; if (!current.includes(val)) { setUserForm({ ...userForm, sub_role: [...current, val].join(', ') }); } setNewSubRoleInput(''); } }}><i className="fas fa-plus"></i> Add</button>
+                          </div>
+                        </div>
                       </div>
                     </div>
                     <div className="form-group"><label>System Role</label>
@@ -2533,64 +3773,217 @@ Respond ONLY with a valid JSON object (no markdown, no code fences, no extra tex
               </div>
             )}
 
-            <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem' }}>
+            {/* Search & Filters */}
+            <div className="um-toolbar">
+              <div className="um-search-box">
+                <i className="fas fa-search um-search-icon"></i>
+                <input type="text" className="um-search-input" placeholder="Search by name, email, or member ID..." value={userSearch} onChange={(e) => setUserSearch(e.target.value)} />
+                {userSearch && <button className="um-search-clear" onClick={() => setUserSearch('')}><i className="fas fa-times"></i></button>}
+              </div>
+              <div className="um-filters">
+                <select className="um-filter-select" value={userFilterRole} onChange={(e) => setUserFilterRole(e.target.value)}>
+                  <option value="">All Roles</option>
+                  {ALL_ROLES.map(r => <option key={r} value={r}>{r}</option>)}
+                </select>
+                <select className="um-filter-select" value={userFilterMinistry} onChange={(e) => setUserFilterMinistry(e.target.value)}>
+                  <option value="">All Ministries</option>
+                  {ALL_MINISTRIES.map(m => <option key={m} value={m}>{m}</option>)}
+                </select>
+                <select className="um-filter-select" value={userFilterStatus} onChange={(e) => setUserFilterStatus(e.target.value)}>
+                  <option value="">All Status</option>
+                  <option value="Verified">Verified</option>
+                  <option value="Unverified">Unverified</option>
+                  <option value="Deactivated">Deactivated</option>
+                </select>
+                {(userFilterRole || userFilterMinistry || userFilterStatus) && (
+                  <button className="um-clear-filters" onClick={() => { setUserFilterRole(''); setUserFilterMinistry(''); setUserFilterStatus(''); }}>
+                    <i className="fas fa-times"></i> Clear Filters
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <div className="um-results-count">
+              Showing <strong>{filteredAdminUsers.length}</strong> of <strong>{adminUsers.length}</strong> users
+            </div>
+
+            {/* User Table */}
+            <div className="um-table-wrapper">
+              <table className="um-table">
                 <thead>
-                  <tr style={{ background: 'var(--primary)', color: 'white' }}>
-                    <th style={{ padding: 10 }}>Member ID</th>
-                    <th style={{ padding: 10 }}>Name</th>
-                    <th style={{ padding: 10 }}>Email</th>
-                    <th style={{ padding: 10 }}>Ministry</th>
-                    <th style={{ padding: 10 }}>Ministry Role</th>
-                    <th style={{ padding: 10 }}>System Role</th>
-                    <th style={{ padding: 10 }}>Status</th>
-                    <th style={{ padding: 10 }}>Actions</th>
+                  <tr>
+                    <th>User</th>
+                    <th>Member ID</th>
+                    <th>Ministry</th>
+                    <th>Role</th>
+                    <th>Status</th>
+                    <th style={{ width: 60, textAlign: 'center' }}>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {adminUsers.map((u) => (
-                    <tr key={u.id} style={{ borderBottom: '1px solid #eee', background: u.is_active === false ? 'rgba(220,53,69,0.05)' : 'transparent' }}>
-                      <td style={{ padding: 10 }}>{u.member_id}</td>
-                      <td style={{ padding: 10 }}>{u.firstname} {u.lastname}</td>
-                      <td style={{ padding: 10, fontSize: '0.8rem' }}>{u.email}</td>
-                      <td style={{ padding: 10 }}>
-                        {u.ministry ? <span className="ministry-badge">{u.ministry}</span> : <span style={{ color: '#aaa' }}>—</span>}
+                  {filteredAdminUsers.map((u) => (
+                    <tr key={u.id} className={u.is_active === false ? 'um-row-deactivated' : ''}>
+                      <td>
+                        <div className="um-user-cell">
+                          <div className="um-avatar">
+                            {u.profile_picture ? (
+                              <img src={u.profile_picture} alt="" />
+                            ) : (
+                              <span>{(u.firstname?.[0] || '')}{(u.lastname?.[0] || '')}</span>
+                            )}
+                          </div>
+                          <div className="um-user-info">
+                            <div className="um-user-name">{u.firstname} {u.lastname}</div>
+                            <div className="um-user-email">{u.email}</div>
+                          </div>
+                        </div>
                       </td>
-                      <td style={{ padding: 10 }}>
-                        {u.sub_role ? <span className="sub-role-badge">{u.sub_role}</span> : <span style={{ color: '#aaa' }}>—</span>}
+                      <td><span className="um-member-id">{u.member_id}</span></td>
+                      <td>
+                        {u.ministry ? (
+                          <div className="um-ministry-cell">
+                            <span className="ministry-badge">{u.ministry}</span>
+                            {u.sub_role && u.sub_role.split(',').map(s => s.trim()).filter(Boolean).map((sr, i) => (
+                              <span key={i} className="sub-role-badge">{sr}</span>
+                            ))}
+                          </div>
+                        ) : <span className="um-empty">—</span>}
                       </td>
-                      <td style={{ padding: 10 }}>
+                      <td>
                         {canManage(MODULES.ASSIGN_USER_ROLES) ? (
-                          <select style={{ padding: '4px 8px', borderRadius: 6, border: '1px solid #dee2e6', fontSize: '0.8rem' }} value={u.role} onChange={(e) => handleUserAction(u.id, 'assign-role', { role: e.target.value })}>
+                          <select className="um-role-select" value={u.role} onChange={(e) => setConfirmAction({ type: 'assign-role', userId: u.id, userName: `${u.firstname} ${u.lastname}`, action: 'assign-role', extra: { role: e.target.value }, label: `Change role to "${e.target.value}"` })}>
                             {ALL_ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
                           </select>
-                        ) : <span>{u.role}</span>}
+                        ) : <span className="um-role-pill">{u.role}</span>}
                       </td>
-                      <td style={{ padding: 10 }}>
-                        <span style={{ padding: '2px 8px', borderRadius: 12, fontSize: '0.75rem', background: u.status === 'Verified' ? 'rgba(40,167,69,0.2)' : u.status === 'Deactivated' ? 'rgba(220,53,69,0.2)' : 'rgba(255,193,7,0.2)', color: u.status === 'Verified' ? '#28a745' : u.status === 'Deactivated' ? '#dc3545' : '#ffc107' }}>
-                          {u.status}
-                        </span>
+                      <td>
+                        <span className={`um-status-badge um-status-${u.status?.toLowerCase()}`}>{u.status}</span>
                       </td>
-                      <td style={{ padding: 10 }}>
-                        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                          <button className="btn-small btn-info" onClick={() => handleEditUser(u)} title="Edit User"><i className="fas fa-edit"></i></button>
-                          <button className="btn-small" style={{ background: 'rgba(146,108,21,0.15)', color: 'var(--primary)', border: '1px solid rgba(146,108,21,0.3)', padding: '4px 8px', borderRadius: 6, cursor: 'pointer', fontSize: '0.78rem' }} onClick={() => { setEventPermissionsUser(u); setEventPermissionsForm(u.allowed_event_types || []); }} title="Event Permissions">
-                            <i className="fas fa-calendar-check"></i>
-                            {(u.allowed_event_types || []).length > 0 && <span style={{ marginLeft: 3, fontSize: '0.7rem', fontWeight: 700 }}>{(u.allowed_event_types || []).length}</span>}
-                          </button>
-                          {u.status === 'Unverified' && <button className="btn-small btn-success" onClick={() => handleUserAction(u.id, 'verify')} title="Verify"><i className="fas fa-check"></i></button>}
-                          {u.is_active !== false && <button className="btn-small btn-warning" onClick={() => handleUserAction(u.id, 'deactivate')} title="Deactivate"><i className="fas fa-ban"></i></button>}
-                          {u.is_active === false && <button className="btn-small btn-success" onClick={() => handleUserAction(u.id, 'activate')} title="Activate"><i className="fas fa-check-circle"></i></button>}
-                          <button className="btn-small btn-primary" onClick={() => handleUserAction(u.id, 'reset-password')} title="Reset Password"><i className="fas fa-key"></i></button>
-                          {canManage(MODULES.DELETE_USERS) && <button className="btn-small btn-danger" onClick={() => handleDeleteUser(u.id)} title="Delete"><i className="fas fa-trash"></i></button>}
-                        </div>
+                      <td style={{ position: 'relative', textAlign: 'center' }}>
+                        <button className="um-dots-btn" onClick={(e) => { e.stopPropagation(); setUserActionMenu(userActionMenu === u.id ? null : u.id); }}>
+                          <i className="fas fa-ellipsis-v"></i>
+                        </button>
+                        {userActionMenu === u.id && (
+                          <div className="um-dropdown" onClick={(e) => e.stopPropagation()}>
+                            <button className="um-dropdown-item" onClick={() => { handleEditUser(u); setUserActionMenu(null); }}>
+                              <i className="fas fa-user-edit"></i> Edit User
+                            </button>
+                            <button className="um-dropdown-item" onClick={() => { setEventPermissionsUser(u); setEventPermissionsForm(u.allowed_event_types || []); setUserActionMenu(null); }}>
+                              <i className="fas fa-calendar-check"></i> Event Permissions
+                            </button>
+                            <div className="um-dropdown-divider"></div>
+                            {u.status === 'Unverified' && (
+                              <button className="um-dropdown-item um-item-success" onClick={() => { setConfirmAction({ type: 'verify', userId: u.id, userName: `${u.firstname} ${u.lastname}`, label: 'verify this user' }); setUserActionMenu(null); }}>
+                                <i className="fas fa-check-circle"></i> Verify User
+                              </button>
+                            )}
+                            {u.is_active !== false && (
+                              <button className="um-dropdown-item um-item-warning" onClick={() => { setConfirmAction({ type: 'deactivate', userId: u.id, userName: `${u.firstname} ${u.lastname}`, label: 'deactivate this user' }); setUserActionMenu(null); }}>
+                                <i className="fas fa-ban"></i> Deactivate
+                              </button>
+                            )}
+                            {u.is_active === false && (
+                              <button className="um-dropdown-item um-item-success" onClick={() => { setConfirmAction({ type: 'activate', userId: u.id, userName: `${u.firstname} ${u.lastname}`, label: 'activate this user' }); setUserActionMenu(null); }}>
+                                <i className="fas fa-check-circle"></i> Activate
+                              </button>
+                            )}
+                            <button className="um-dropdown-item" onClick={() => { setShowResetPwModal(u); setResetPwForm({ newPassword: '', confirmPassword: '' }); setUserActionMenu(null); }}>
+                              <i className="fas fa-key"></i> Reset Password
+                            </button>
+                            {canManage(MODULES.DELETE_USERS) && (
+                              <>
+                                <div className="um-dropdown-divider"></div>
+                                <button className="um-dropdown-item um-item-danger" onClick={() => { setConfirmAction({ type: 'delete', userId: u.id, userName: `${u.firstname} ${u.lastname}`, label: 'permanently delete this user' }); setUserActionMenu(null); }}>
+                                  <i className="fas fa-trash-alt"></i> Delete User
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        )}
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
-            {adminUsers.length === 0 && <p style={{ color: '#6c757d', marginTop: 15 }}>No users found.</p>}
+            {filteredAdminUsers.length === 0 && <div className="um-empty-state"><i className="fas fa-users-slash"></i><p>No users found matching your criteria.</p></div>}
+
+            {/* Confirmation Modal */}
+            {confirmAction && (
+              <div className="um-modal-overlay" onClick={() => setConfirmAction(null)}>
+                <div className="um-confirm-modal" onClick={(e) => e.stopPropagation()}>
+                  <div className="um-confirm-icon">
+                    <i className={`fas ${confirmAction.type === 'delete' ? 'fa-exclamation-triangle' : confirmAction.type === 'deactivate' ? 'fa-ban' : 'fa-question-circle'}`}></i>
+                  </div>
+                  <h3 className="um-confirm-title">Are you sure?</h3>
+                  <p className="um-confirm-text">
+                    You are about to <strong>{confirmAction.label}</strong> for <strong>{confirmAction.userName}</strong>.
+                    {confirmAction.type === 'delete' && <><br /><span className="um-confirm-warning">This action cannot be undone.</span></>}
+                  </p>
+                  <div className="um-confirm-actions">
+                    <button className="um-btn-cancel" onClick={() => setConfirmAction(null)}>Cancel</button>
+                    <button className={`um-btn-confirm ${confirmAction.type === 'delete' ? 'um-btn-confirm-danger' : confirmAction.type === 'deactivate' ? 'um-btn-confirm-warning' : 'um-btn-confirm-success'}`}
+                      onClick={() => {
+                        if (confirmAction.type === 'delete') handleDeleteUser(confirmAction.userId);
+                        else if (confirmAction.type === 'assign-role') handleUserAction(confirmAction.userId, 'assign-role', confirmAction.extra);
+                        else handleUserAction(confirmAction.userId, confirmAction.type);
+                      }}>
+                      Yes, {confirmAction.type === 'delete' ? 'Delete' : confirmAction.type === 'deactivate' ? 'Deactivate' : confirmAction.type === 'activate' ? 'Activate' : confirmAction.type === 'verify' ? 'Verify' : 'Confirm'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Reset Password Modal */}
+            {showResetPwModal && (
+              <div className="um-modal-overlay" onClick={() => { setShowResetPwModal(null); setResetPwForm({ newPassword: '', confirmPassword: '' }); }}>
+                <div className="um-reset-modal" onClick={(e) => e.stopPropagation()}>
+                  <div className="um-reset-header">
+                    <h3><i className="fas fa-key"></i> Reset Password</h3>
+                    <button className="btn-close-modal" onClick={() => { setShowResetPwModal(null); setResetPwForm({ newPassword: '', confirmPassword: '' }); }}><i className="fas fa-times"></i></button>
+                  </div>
+                  <div className="um-reset-body">
+                    <div className="um-reset-user-info">
+                      <div className="um-avatar" style={{ width: 40, height: 40, fontSize: '0.85rem' }}>
+                        {showResetPwModal.profile_picture ? <img src={showResetPwModal.profile_picture} alt="" /> : <span>{(showResetPwModal.firstname?.[0] || '')}{(showResetPwModal.lastname?.[0] || '')}</span>}
+                      </div>
+                      <div>
+                        <strong>{showResetPwModal.firstname} {showResetPwModal.lastname}</strong>
+                        <div style={{ fontSize: '0.82rem', color: 'var(--text-secondary, #6c757d)' }}>{showResetPwModal.email}</div>
+                      </div>
+                    </div>
+                    <div className="form-group" style={{ marginBottom: 14 }}>
+                      <label>New Password</label>
+                      <div className="um-pw-field">
+                        <input className="form-control" type={showResetPw.new ? 'text' : 'password'} placeholder="Enter new password (min 8 chars)" value={resetPwForm.newPassword} onChange={(e) => setResetPwForm({ ...resetPwForm, newPassword: e.target.value })} style={{ padding: '10px 40px 10px 15px' }} />
+                        <button type="button" className="um-pw-toggle" onClick={() => setShowResetPw({ ...showResetPw, new: !showResetPw.new })}>
+                          <i className={`fas ${showResetPw.new ? 'fa-eye-slash' : 'fa-eye'}`}></i>
+                        </button>
+                      </div>
+                    </div>
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label>Confirm Password</label>
+                      <div className="um-pw-field">
+                        <input className="form-control" type={showResetPw.confirm ? 'text' : 'password'} placeholder="Confirm new password" value={resetPwForm.confirmPassword} onChange={(e) => setResetPwForm({ ...resetPwForm, confirmPassword: e.target.value })} style={{ padding: '10px 40px 10px 15px' }} />
+                        <button type="button" className="um-pw-toggle" onClick={() => setShowResetPw({ ...showResetPw, confirm: !showResetPw.confirm })}>
+                          <i className={`fas ${showResetPw.confirm ? 'fa-eye-slash' : 'fa-eye'}`}></i>
+                        </button>
+                      </div>
+                    </div>
+                    {resetPwForm.newPassword && resetPwForm.confirmPassword && resetPwForm.newPassword !== resetPwForm.confirmPassword && (
+                      <p className="um-pw-mismatch"><i className="fas fa-exclamation-circle"></i> Passwords do not match</p>
+                    )}
+                  </div>
+                  <div className="um-reset-footer">
+                    <button className="btn-secondary" onClick={() => { setShowResetPwModal(null); setResetPwForm({ newPassword: '', confirmPassword: '' }); }}>Cancel</button>
+                    <button className="btn-primary" onClick={() => handleAdminResetPassword(showResetPwModal.id)} disabled={!resetPwForm.newPassword || resetPwForm.newPassword.length < 8 || resetPwForm.newPassword !== resetPwForm.confirmPassword}>
+                      <i className="fas fa-save"></i> Save Password
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </section>
 
           {/* ========== MINISTRY MANAGEMENT (Admin/Super Admin) ========== */}
@@ -2833,94 +4226,259 @@ Respond ONLY with a valid JSON object (no markdown, no code fences, no extra tex
           <section className={`content-section ${activeSection === 'my-profile' ? 'active' : ''}`}>
             <h2 className="section-title">My Profile</h2>
 
-            {/* Profile Header Card */}
-            <div className="profile-header-card">
-              <div className="profile-header-bg"></div>
-              <div className="profile-header-content">
-                <div className="profile-header-avatar">
-                  {userData.profile_picture ? (
-                    <img src={userData.profile_picture} alt="Profile" referrerPolicy="no-referrer" />
-                  ) : (
-                    <span className="profile-header-initials">{initials}</span>
+            {/* Profile Picture Crop Modal */}
+            {showCropModal && cropImage && (
+              <div className={`profile-crop-modal-overlay ${closingCropModal ? 'closing' : ''}`} onClick={closeCropModal}>
+                <div className={`profile-crop-modal ${closingCropModal ? 'closing' : ''}`} onClick={(e) => e.stopPropagation()}>
+                  <div className="profile-crop-modal-header">
+                    <h3><i className="fas fa-crop-alt"></i> Crop Your Photo</h3>
+                    <button className="btn-close-modal" onClick={closeCropModal}><i className="fas fa-times"></i></button>
+                  </div>
+                  <div className="profile-crop-container">
+                    <Cropper
+                      image={cropImage}
+                      crop={crop}
+                      zoom={zoom}
+                      aspect={1}
+                      cropShape="round"
+                      showGrid={false}
+                      onCropChange={setCrop}
+                      onZoomChange={setZoom}
+                      onCropComplete={(_, croppedPixels) => setCroppedAreaPixels(croppedPixels)}
+                    />
+                  </div>
+                  <div className="profile-crop-controls">
+                    <div className="profile-crop-zoom">
+                      <i className="fas fa-search-minus"></i>
+                      <input type="range" min={1} max={3} step={0.1} value={zoom} onChange={(e) => setZoom(Number(e.target.value))} className="profile-crop-slider" />
+                      <i className="fas fa-search-plus"></i>
+                    </div>
+                    <div className="profile-crop-actions">
+                      <button className="btn-secondary" onClick={closeCropModal}>Cancel</button>
+                      <button className="btn-primary" onClick={handleCropComplete} disabled={uploadingPic}>
+                        {uploadingPic ? <><i className="fas fa-spinner fa-spin"></i> Uploading...</> : <><i className="fas fa-check"></i> Save Photo</>}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* View Profile Picture Lightbox */}
+            {viewProfilePic && userData.profile_picture && (
+              <div className="profile-pic-lightbox" onClick={() => setViewProfilePic(false)}>
+                <div className="profile-pic-lightbox-content" onClick={(e) => e.stopPropagation()}>
+                  <button className="profile-pic-lightbox-close" onClick={() => setViewProfilePic(false)}><i className="fas fa-times"></i></button>
+                  <img src={userData.profile_picture} alt="Profile" referrerPolicy="no-referrer" />
+                  <p className="profile-pic-lightbox-name">{userData.firstname} {userData.lastname}</p>
+                </div>
+              </div>
+            )}
+
+            {/* Profile Header Card - LinkedIn Modern */}
+            <div className="profile-card-v3">
+              <div className="profile-banner-v3"></div>
+              <div className="profile-avatar-section-v3">
+                <div className="profile-avatar-wrapper-v3" ref={avatarWrapperRef}>
+                  <div className="profile-avatar-v3" onClick={() => setShowAvatarMenu(!showAvatarMenu)} title="Profile photo options">
+                    {userData.profile_picture ? (
+                      <img src={userData.profile_picture} alt="Profile" referrerPolicy="no-referrer" />
+                    ) : (
+                      <span className="profile-avatar-initials-v3">{initials}</span>
+                    )}
+                    <div className="profile-avatar-overlay-v3">
+                      <i className="fas fa-camera"></i>
+                    </div>
+                    <div className={`profile-avatar-badge-v3 ${isVerified ? 'verified' : 'unverified'}`}>
+                      <i className={`fas fa-${isVerified ? 'check' : 'clock'}`}></i>
+                    </div>
+                  </div>
+                  {showAvatarMenu && (
+                    <div className="profile-avatar-menu" ref={avatarMenuRef} onClick={(e) => e.stopPropagation()}>
+                      {userData.profile_picture && (
+                        <button className="profile-avatar-menu-item" onClick={() => { setViewProfilePic(true); setShowAvatarMenu(false); }}>
+                          <i className="fas fa-eye"></i> View Photo
+                        </button>
+                      )}
+                      <button className="profile-avatar-menu-item" onClick={() => { profilePicInputRef.current?.click(); setShowAvatarMenu(false); }}>
+                        <i className="fas fa-upload"></i> Upload Photo
+                      </button>
+                    </div>
                   )}
-                  <div className={`profile-header-status ${isVerified ? 'verified' : 'unverified'}`}>
-                    <i className={`fas fa-${isVerified ? 'check' : 'clock'}`}></i>
-                  </div>
+                  <input ref={profilePicInputRef} type="file" accept="image/jpeg,image/png,image/webp,image/gif" style={{ display: 'none' }} onChange={handleProfilePicSelect} />
                 </div>
-                <div className="profile-header-info">
-                  <h3 className="profile-header-name">{userData.firstname} {userData.lastname}</h3>
-                  <p className="profile-header-email">{userData.email}</p>
-                  <div className="profile-header-meta">
-                    <span className="profile-header-role"><i className="fas fa-shield-alt"></i> {userRole}</span>
-                    {userData.ministry && <span className="profile-header-ministry"><i className="fas fa-church"></i> {userData.ministry}</span>}
-                    <span className={`profile-header-badge ${isVerified ? 'verified' : 'unverified'}`}>{isVerified ? 'Verified' : 'Pending'}</span>
-                  </div>
+              </div>
+              <div className="profile-details-v3">
+                <div className="profile-name-row-v3">
+                  <h2 className="profile-name-v3">{userData.firstname} {userData.lastname}</h2>
+                  <span className={`profile-verified-pill-v3 ${isVerified ? 'verified' : 'unverified'}`}>
+                    <i className={`fas fa-${isVerified ? 'check-circle' : 'clock'}`}></i> {isVerified ? 'Verified' : 'Pending'}
+                  </span>
                 </div>
+                <div className="profile-meta-row-v3">
+                  <span className="profile-role-chip-v3"><i className="fas fa-shield-alt"></i> {userRole}</span>
+                  {userData.ministry && <span className="profile-ministry-chip-v3"><i className="fas fa-church"></i> {userData.ministry}</span>}
+                </div>
+                {userData.life_verse && (
+                  <div className="profile-verse-v3">
+                    <i className="fas fa-bible"></i>
+                    <span>&ldquo;{userData.life_verse}&rdquo;</span>
+                  </div>
+                )}
               </div>
             </div>
 
             <div className="profile-tabs">
-              <button className={`profile-tab ${profileTab === 'personal' ? 'active' : ''}`} onClick={() => setProfileTab('personal')}>Personal Info</button>
-              <button className={`profile-tab ${profileTab === 'password' ? 'active' : ''}`} onClick={() => setProfileTab('password')}>Change Password</button>
-              <button className={`profile-tab ${profileTab === 'preferences' ? 'active' : ''}`} onClick={() => setProfileTab('preferences')}>Preferences</button>
+              <button className={`profile-tab ${profileTab === 'personal' ? 'active' : ''}`} onClick={() => setProfileTab('personal')}><i className="fas fa-user"></i> Personal Info</button>
+              <button className={`profile-tab ${profileTab === 'password' ? 'active' : ''}`} onClick={() => setProfileTab('password')}><i className="fas fa-lock"></i> Change Password</button>
+              <button className={`profile-tab ${profileTab === 'preferences' ? 'active' : ''}`} onClick={() => setProfileTab('preferences')}><i className="fas fa-cog"></i> Preferences</button>
             </div>
 
             {profileTab === 'personal' && (
-              <div className="profile-form">
-                <div className="form-row" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 15 }}>
-                  <div className="form-group"><label>First Name</label><input className="form-control" style={{ padding: '10px 15px' }} value={profileForm.firstname} onChange={(e) => setProfileForm({ ...profileForm, firstname: e.target.value })} /></div>
-                  <div className="form-group"><label>Last Name</label><input className="form-control" style={{ padding: '10px 15px' }} value={profileForm.lastname} onChange={(e) => setProfileForm({ ...profileForm, lastname: e.target.value })} /></div>
+              <div className="profile-form profile-form-v2">
+                <div className="profile-form-section-title"><i className="fas fa-edit"></i> Editable Information</div>
+                <div className="form-row" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 18 }}>
+                  <div className="form-group profile-field-editable">
+                    <label>First Name</label>
+                    <input className="form-control" style={{ padding: '12px 16px' }} value={profileForm.firstname} onChange={(e) => setProfileForm({ ...profileForm, firstname: e.target.value })} />
+                  </div>
+                  <div className="form-group profile-field-editable">
+                    <label>Last Name</label>
+                    <input className="form-control" style={{ padding: '12px 16px' }} value={profileForm.lastname} onChange={(e) => setProfileForm({ ...profileForm, lastname: e.target.value })} />
+                  </div>
                 </div>
-                <div className="form-group"><label>Email Address</label><input className="form-control" style={{ padding: '10px 15px' }} value={userData.email || ''} readOnly /></div>
+                <div className="form-group profile-field-editable">
+                  <label><i className="fas fa-birthday-cake" style={{ marginRight: 6, color: 'var(--primary)' }}></i>Birthdate</label>
+                  <input type="date" className="form-control" style={{ padding: '12px 16px' }} value={profileForm.birthdate || ''} onChange={(e) => setProfileForm({ ...profileForm, birthdate: e.target.value })} />
+                </div>
+                <div className="form-group profile-field-editable">
+                  <label><i className="fas fa-bible" style={{ marginRight: 6, color: 'var(--primary)' }}></i>Life Verse</label>
+                  <input className="form-control" style={{ padding: '12px 16px' }} placeholder='e.g. Jeremiah 29:11 - For I know the plans I have for you...' value={profileForm.life_verse || ''} onChange={(e) => setProfileForm({ ...profileForm, life_verse: e.target.value })} />
+                  <small style={{ color: '#6c757d', fontSize: '0.78rem', marginTop: 4, display: 'block' }}>Share your favorite Bible verse that inspires you</small>
+                </div>
+
+                <div className="profile-form-section-title" style={{ marginTop: 28 }}><i className="fas fa-lock"></i> Account Information <span style={{ fontSize: '0.75rem', fontWeight: 400, color: '#999' }}>(Read only)</span></div>
+                <div className="form-group profile-field-readonly">
+                  <label>Email Address</label>
+                  <input className="form-control profile-input-disabled" style={{ padding: '12px 16px' }} value={userData.email || ''} readOnly />
+                </div>
                 {userRole !== 'Guest' && (
                   <>
-                    <div className="form-group"><label>Ministry</label><input className="form-control" style={{ padding: '10px 15px' }} value={userData.ministry || 'Not Assigned'} readOnly /></div>
-                    <div className="form-group"><label>Role</label><input className="form-control" style={{ padding: '10px 15px' }} value={userRole} readOnly /></div>
-                    <div className="form-group"><label>Status</label><input className="form-control" style={{ padding: '10px 15px' }} value={userData.status || ''} readOnly /></div>
-                    <div className="form-group"><label>Member ID</label><input className="form-control" style={{ padding: '10px 15px' }} value={userData.memberId || 'N/A'} readOnly /></div>
+                    <div className="form-row" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 18 }}>
+                      <div className="form-group profile-field-readonly">
+                        <label>Ministry</label>
+                        <input className="form-control profile-input-disabled" style={{ padding: '12px 16px' }} value={userData.ministry || 'Not Assigned'} readOnly />
+                      </div>
+                      <div className="form-group profile-field-readonly">
+                        <label>Role</label>
+                        <input className="form-control profile-input-disabled" style={{ padding: '12px 16px' }} value={userRole} readOnly />
+                      </div>
+                    </div>
+                    <div className="form-row" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 18 }}>
+                      <div className="form-group profile-field-readonly">
+                        <label>Status</label>
+                        <input className="form-control profile-input-disabled" style={{ padding: '12px 16px' }} value={userData.status || ''} readOnly />
+                      </div>
+                      <div className="form-group profile-field-readonly">
+                        <label>Member ID</label>
+                        <input className="form-control profile-input-disabled" style={{ padding: '12px 16px' }} value={userData.memberId || 'N/A'} readOnly />
+                      </div>
+                    </div>
                   </>
                 )}
-                <button className="btn-primary" onClick={saveProfile} disabled={profileLoading}>{profileLoading ? 'Saving...' : 'Save Changes'}</button>
+                <button className="btn-primary profile-save-btn" onClick={saveProfile} disabled={profileLoading}>{profileLoading ? <><i className="fas fa-spinner fa-spin"></i> Saving...</> : <><i className="fas fa-save"></i> Save Changes</>}</button>
               </div>
             )}
 
             {profileTab === 'password' && (
-              <div className="profile-form">
+              <div className="profile-form profile-form-v2">
                 {userData.isGoogleUser && !hasLocalPassword ? (
                   <>
-                    <div style={{ padding: '16px 20px', background: 'rgba(255,195,0,0.1)', borderRadius: 12, marginBottom: 20, border: '1px solid rgba(255,195,0,0.3)' }}>
-                      <p style={{ margin: 0, fontSize: '0.9rem', color: 'var(--accent)' }}>
-                        <i className="fas fa-info-circle" style={{ marginRight: 8 }}></i>
-                        You signed up with Google. Set a password below so you can also log in manually with your email and password.
-                      </p>
+                    <div className="profile-password-notice profile-password-notice-warning">
+                      <i className="fas fa-info-circle"></i>
+                      <p>You signed up with Google. Set a password below so you can also log in manually with your email and password.</p>
                     </div>
-                    <div className="form-group"><label>New Password</label><input type="password" className="form-control" style={{ padding: '10px 15px' }} placeholder="At least 8 characters" value={setPasswordFormData.newPassword} onChange={(e) => setSetPasswordFormData({ ...setPasswordFormData, newPassword: e.target.value })} /></div>
-                    <div className="form-group"><label>Confirm Password</label><input type="password" className="form-control" style={{ padding: '10px 15px' }} placeholder="Confirm your password" value={setPasswordFormData.confirmPassword} onChange={(e) => setSetPasswordFormData({ ...setPasswordFormData, confirmPassword: e.target.value })} /></div>
-                    {setPasswordFormData.confirmPassword && setPasswordFormData.newPassword !== setPasswordFormData.confirmPassword && <p style={{ color: 'var(--danger)', fontSize: '0.85rem' }}>Passwords do not match</p>}
-                    <button className="btn-primary" onClick={handleSetPassword} disabled={profileLoading}>{profileLoading ? 'Setting Password...' : 'Set Password'}</button>
+                    <div className="form-group">
+                      <label>New Password</label>
+                      <div className="password-input-wrapper">
+                        <input type={showSetNewPassword ? 'text' : 'password'} className="form-control" style={{ padding: '12px 16px', paddingRight: 45 }} placeholder="At least 8 characters" value={setPasswordFormData.newPassword} onChange={(e) => setSetPasswordFormData({ ...setPasswordFormData, newPassword: e.target.value })} />
+                        <button type="button" className="password-eye-btn" onClick={() => setShowSetNewPassword(!showSetNewPassword)} tabIndex={-1}>
+                          <i className={`fas fa-eye${showSetNewPassword ? '-slash' : ''}`}></i>
+                        </button>
+                      </div>
+                      {setPasswordFormData.newPassword && (() => { const s = getPasswordStrength(setPasswordFormData.newPassword); return (
+                        <div className="password-strength-bar-container">
+                          <div className="password-strength-bar">
+                            {[1,2,3,4,5].map(i => (<div key={i} className="password-strength-segment" style={{ background: i <= s.score ? s.color : '#e0e0e0' }}></div>))}
+                          </div>
+                          <span className="password-strength-label" style={{ color: s.color }}>{s.label}</span>
+                        </div>
+                      ); })()}
+                    </div>
+                    <div className="form-group">
+                      <label>Confirm Password</label>
+                      <div className="password-input-wrapper">
+                        <input type={showSetConfirmPassword ? 'text' : 'password'} className="form-control" style={{ padding: '12px 16px', paddingRight: 45 }} placeholder="Confirm your password" value={setPasswordFormData.confirmPassword} onChange={(e) => setSetPasswordFormData({ ...setPasswordFormData, confirmPassword: e.target.value })} />
+                        <button type="button" className="password-eye-btn" onClick={() => setShowSetConfirmPassword(!showSetConfirmPassword)} tabIndex={-1}>
+                          <i className={`fas fa-eye${showSetConfirmPassword ? '-slash' : ''}`}></i>
+                        </button>
+                      </div>
+                    </div>
+                    {setPasswordFormData.confirmPassword && setPasswordFormData.newPassword !== setPasswordFormData.confirmPassword && <p className="password-mismatch-msg"><i className="fas fa-exclamation-circle"></i> Passwords do not match</p>}
+                    <button className="btn-primary profile-save-btn" onClick={handleSetPassword} disabled={profileLoading}>{profileLoading ? <><i className="fas fa-spinner fa-spin"></i> Setting Password...</> : <><i className="fas fa-key"></i> Set Password</>}</button>
                   </>
                 ) : (
                   <>
                     {userData.isGoogleUser && hasLocalPassword && (
-                      <div style={{ padding: '16px 20px', background: 'rgba(40,167,69,0.1)', borderRadius: 12, marginBottom: 20, border: '1px solid rgba(40,167,69,0.3)' }}>
-                        <p style={{ margin: 0, fontSize: '0.9rem', color: '#28a745' }}>
-                          <i className="fas fa-check-circle" style={{ marginRight: 8 }}></i>
-                          Password set! You can now log in with your email and password, or continue using Google.
-                        </p>
+                      <div className="profile-password-notice profile-password-notice-success">
+                        <i className="fas fa-check-circle"></i>
+                        <p>Password set! You can now log in with your email and password, or continue using Google.</p>
                       </div>
                     )}
-                    <div className="form-group"><label>Current Password</label><input type="password" className="form-control" style={{ padding: '10px 15px' }} value={passwordForm.currentPassword} onChange={(e) => setPasswordForm({ ...passwordForm, currentPassword: e.target.value })} /></div>
-                    <div className="form-group"><label>New Password</label><input type="password" className="form-control" style={{ padding: '10px 15px' }} value={passwordForm.newPassword} onChange={(e) => setPasswordForm({ ...passwordForm, newPassword: e.target.value })} /></div>
-                    <div className="form-group"><label>Confirm New Password</label><input type="password" className="form-control" style={{ padding: '10px 15px' }} value={passwordForm.confirmPassword} onChange={(e) => setPasswordForm({ ...passwordForm, confirmPassword: e.target.value })} /></div>
-                    {passwordForm.confirmPassword && passwordForm.newPassword !== passwordForm.confirmPassword && <p style={{ color: 'var(--danger)', fontSize: '0.85rem' }}>Passwords do not match</p>}
-                    <button className="btn-primary" onClick={changePassword} disabled={profileLoading}>{profileLoading ? 'Updating...' : 'Update Password'}</button>
+                    <div className="form-group">
+                      <label>Current Password</label>
+                      <div className="password-input-wrapper">
+                        <input type={showCurrentPassword ? 'text' : 'password'} className="form-control" style={{ padding: '12px 16px', paddingRight: 45 }} placeholder="Enter current password" value={passwordForm.currentPassword} onChange={(e) => setPasswordForm({ ...passwordForm, currentPassword: e.target.value })} />
+                        <button type="button" className="password-eye-btn" onClick={() => setShowCurrentPassword(!showCurrentPassword)} tabIndex={-1}>
+                          <i className={`fas fa-eye${showCurrentPassword ? '-slash' : ''}`}></i>
+                        </button>
+                      </div>
+                    </div>
+                    <div className="form-group">
+                      <label>New Password</label>
+                      <div className="password-input-wrapper">
+                        <input type={showNewPassword ? 'text' : 'password'} className="form-control" style={{ padding: '12px 16px', paddingRight: 45 }} placeholder="At least 8 characters" value={passwordForm.newPassword} onChange={(e) => setPasswordForm({ ...passwordForm, newPassword: e.target.value })} />
+                        <button type="button" className="password-eye-btn" onClick={() => setShowNewPassword(!showNewPassword)} tabIndex={-1}>
+                          <i className={`fas fa-eye${showNewPassword ? '-slash' : ''}`}></i>
+                        </button>
+                      </div>
+                      {passwordForm.newPassword && (() => { const s = getPasswordStrength(passwordForm.newPassword); return (
+                        <div className="password-strength-bar-container">
+                          <div className="password-strength-bar">
+                            {[1,2,3,4,5].map(i => (<div key={i} className="password-strength-segment" style={{ background: i <= s.score ? s.color : '#e0e0e0' }}></div>))}
+                          </div>
+                          <span className="password-strength-label" style={{ color: s.color }}>{s.label}</span>
+                        </div>
+                      ); })()}
+                    </div>
+                    <div className="form-group">
+                      <label>Confirm New Password</label>
+                      <div className="password-input-wrapper">
+                        <input type={showConfirmPassword ? 'text' : 'password'} className="form-control" style={{ padding: '12px 16px', paddingRight: 45 }} placeholder="Re-enter new password" value={passwordForm.confirmPassword} onChange={(e) => setPasswordForm({ ...passwordForm, confirmPassword: e.target.value })} />
+                        <button type="button" className="password-eye-btn" onClick={() => setShowConfirmPassword(!showConfirmPassword)} tabIndex={-1}>
+                          <i className={`fas fa-eye${showConfirmPassword ? '-slash' : ''}`}></i>
+                        </button>
+                      </div>
+                    </div>
+                    {passwordForm.confirmPassword && passwordForm.newPassword !== passwordForm.confirmPassword && <p className="password-mismatch-msg"><i className="fas fa-exclamation-circle"></i> Passwords do not match</p>}
+                    <button className="btn-primary profile-save-btn" onClick={changePassword} disabled={profileLoading}>{profileLoading ? <><i className="fas fa-spinner fa-spin"></i> Updating...</> : <><i className="fas fa-key"></i> Update Password</>}</button>
                   </>
                 )}
               </div>
             )}
 
             {profileTab === 'preferences' && (
-              <div className="profile-form">
+              <div className="profile-form profile-form-v2">
                 <div className="preference-item">
                   <div><strong>Dark Mode</strong><p style={{ color: '#6c757d', fontSize: '0.85rem' }}>Toggle dark theme for the dashboard</p></div>
                   <label className="switch"><input type="checkbox" checked={darkMode} onChange={toggleDarkMode} /><span className="slider round"></span></label>
@@ -3332,237 +4890,1182 @@ Respond ONLY with a valid JSON object (no markdown, no code fences, no extra tex
             </div>
           </section>
 
-          {/* ========== CREATE LINEUP (Song Leader) ========== */}
-          {canManage(MODULES.CREATE_SONG_LIST) && (
-            <section className={`content-section ${activeSection === 'create-lineup' ? 'active' : ''}`}>
-              <h2 className="section-title">{isAdmin ? (editingLineup ? 'Edit Assignment' : 'Assign Lineup') : (editingLineup ? 'Edit Songs' : 'Create Lineup')}</h2>
+          {/* ========== PRAISE & WORSHIP SECTION ========== */}
+          <section className={`content-section ${activeSection === 'praise-worship' ? 'active' : ''}`}>
+            <div className="paw-page-header">
+              <div className="paw-page-title-row">
+                <h2 className="section-title paw-main-title"><i className="fas fa-hands-praying"></i> Praise & Worship</h2>
+                <span className="paw-role-badge">
+                  <i className={`fas ${
+                    (userData?.sub_role || '').includes('Song Leader') ? 'fa-microphone' :
+                    (userData?.sub_role || '').includes('Backup Singer') ? 'fa-users' :
+                    (userData?.sub_role || '').includes('Instrumentalist') ? 'fa-guitar' :
+                    (userData?.sub_role || '').includes('Dancer') || (userData?.ministry || '') === 'Dancers' ? 'fa-person-running' :
+                    (userData?.ministry || '') === 'Media' ? 'fa-desktop' :
+                    (userData?.ministry || '') === 'Pastors' || userRole === 'Pastor' ? 'fa-cross' :
+                    'fa-music'
+                  }`}></i>
+                  {userData?.sub_role || userData?.ministry || userRole}
+                </span>
+              </div>
 
-              {/* SUCCESS VIEW */}
-              {lineupView === 'success' && (
-                <div className="lineup-success-container">
-                  <div className="lineup-success-icon"><i className="fas fa-check-circle"></i></div>
-                  <h3>{isAdmin ? (editingLineup ? 'Assignment Updated!' : 'Lineup Assigned!') : (editingLineup ? 'Songs Updated!' : 'Songs Submitted!')}</h3>
-                  <p>{isAdmin ? <>Song Leader and Backupers have been {editingLineup ? 'updated' : 'assigned'} for <strong>{formatDate(lineupForm.scheduleDate)}</strong>. The Song Leader will be notified.</> : <>Your songs for <strong>{formatDate(lineupForm.scheduleDate)}</strong> have been {editingLineup ? 'updated' : 'saved'}.</>}</p>
-                  <button className="btn-primary" onClick={resetLineupForm} style={{ marginTop: 20, padding: '12px 30px' }}><i className="fas fa-plus"></i> {isAdmin ? 'Assign Another' : 'Back to Calendar'}</button>
-                </div>
-              )}
-
-              {/* CALENDAR VIEW — pick a date first */}
-              {lineupView === 'calendar' && (
-                <div className="lineup-calendar-container">
-                  <div className="lineup-calendar-info">
-                    <i className="fas fa-info-circle"></i>
-                    <span>{isAdmin ? 'Select a date to assign a Song Leader and Backupers' : 'Tap your assigned date to add songs. Tap other dates to view details.'}</span>
+              {/* AI Bible Verse Encouragement */}
+              <div className="paw-bible-verse-card">
+                <div className="paw-bible-verse-glow"></div>
+                {pawBibleVerseLoading ? (
+                  <div className="paw-bible-loading"><i className="fas fa-spinner fa-spin"></i> Generating encouragement...</div>
+                ) : pawBibleVerse ? (
+                  <>
+                    <div className="paw-bible-verse-icon"><i className="fas fa-bible"></i></div>
+                    <div className="paw-bible-verse-content">
+                      <p className="paw-bible-verse-text">&ldquo;{pawBibleVerse.verse}&rdquo;</p>
+                      <p className="paw-bible-verse-ref">— {pawBibleVerse.reference}</p>
+                      {pawBibleVerse.encouragement && <p className="paw-bible-verse-encourage"><i className="fas fa-heart"></i> {pawBibleVerse.encouragement}</p>}
+                    </div>
+                  </>
+                ) : (
+                  <div className="paw-bible-loading">
+                    <i className="fas fa-bible"></i> <span>&ldquo;Sing to the Lord a new song; sing to the Lord, all the earth.&rdquo; — Psalm 96:1</span>
                   </div>
+                )}
+              </div>
+            </div>
 
-                  {/* Song Leader: show assigned dates info */}
-                  {!isAdmin && getAssignedDates().length > 0 && (
-                    <div className="lineup-assigned-info" style={{ background: 'rgba(146,108,21,0.08)', border: '1px solid rgba(146,108,21,0.2)', borderRadius: 12, padding: '16px 20px', marginBottom: 20 }}>
-                      <h4 style={{ margin: '0 0 10px', fontSize: '0.95rem', color: 'var(--primary)' }}><i className="fas fa-star" style={{ marginRight: 8 }}></i>Your Assigned Dates</h4>
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                        {getAssignedDates().map(dateStr => {
-                          const backups = getAssignedBackups(dateStr);
-                          const isPast = new Date(dateStr + 'T00:00:00') < new Date(new Date().toDateString());
-                          return (
-                            <div key={dateStr} style={{ background: isPast ? '#ccc' : 'linear-gradient(135deg, var(--primary), var(--secondary))', color: isPast ? '#666' : '#fff', padding: '8px 14px', borderRadius: 8, fontSize: '0.82rem', fontWeight: 600, opacity: isPast ? 0.6 : 1 }}>
-                              <div>{formatDate(dateStr)} {isPast && '(Past)'}</div>
-                              {backups.length > 0 && <div style={{ fontSize: '0.75rem', opacity: 0.85, marginTop: 2 }}><i className="fas fa-users" style={{ marginRight: 4 }}></i>{backups.join(', ')}</div>}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  )}
+            {/* PAW Tab Bar */}
+            <div className="paw-tab-bar">
+              <button className={`paw-tab ${pawTab === 'schedules' ? 'active' : ''}`} onClick={() => { setPawTab('schedules'); loadPawSchedules(); }}>
+                <i className="fas fa-calendar-alt"></i> Schedule Lineups
+              </button>
+              <button className={`paw-tab ${pawTab === 'my-schedule' ? 'active' : ''}`} onClick={() => { setPawTab('my-schedule'); loadPawMySchedules(); }}>
+                <i className="fas fa-user-check"></i> My Schedule
+              </button>
+              <button className={`paw-tab ${pawTab === 'notifications' ? 'active' : ''}`} onClick={() => { setPawTab('notifications'); loadPawNotifications(); }}>
+                <i className="fas fa-bell"></i> Notifications
+                {pawNotifications.filter(n => !n.is_read).length > 0 && (
+                  <span className="paw-notif-badge">{pawNotifications.filter(n => !n.is_read).length}</span>
+                )}
+              </button>
+            </div>
 
-                  <div className="lineup-calendar-card">
-                    <div className="lineup-cal-header">
-                      <button onClick={() => setLineupCalendarMonth(new Date(lineupCalendarMonth.getFullYear(), lineupCalendarMonth.getMonth() - 1))}><i className="fas fa-chevron-left"></i></button>
-                      <h3>{lineupCalendarMonth.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</h3>
-                      <button onClick={() => setLineupCalendarMonth(new Date(lineupCalendarMonth.getFullYear(), lineupCalendarMonth.getMonth() + 1))}><i className="fas fa-chevron-right"></i></button>
-                    </div>
-                    <div className="lineup-cal-weekdays">
-                      {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(d => <div key={d} className="lineup-cal-weekday">{d}</div>)}
-                    </div>
-                    <div className="lineup-cal-grid">
-                      {getLineupCalendarDays().map((day, i) => {
-                        const taken = isLineupDateTaken(day);
-                        const past = isLineupDatePast(day);
-                        const today = day && new Date().getDate() === day && new Date().getMonth() === lineupCalendarMonth.getMonth() && new Date().getFullYear() === lineupCalendarMonth.getFullYear();
-                        const dateStr = day ? `${lineupCalendarMonth.getFullYear()}-${String(lineupCalendarMonth.getMonth() + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}` : '';
-                        const schedule = day && taken ? scheduleData.find(s => s.scheduleDate === dateStr) : null;
-                        const leaderName = schedule ? schedule.songLeader : '';
-                        const leaderFirstName = leaderName ? leaderName.split(' ')[0] : '';
-                        const assigned = !isAdmin && day && getAssignedDates().includes(dateStr);
-                        const assignedAndPast = assigned && past;
-                        const assignedAndFuture = assigned && !past;
-                        const slViewable = !isAdmin && day && taken && !assigned;
-                        return (
-                          <div key={i} className={`lineup-cal-day${!day ? ' empty' : ''}${isAdmin && taken ? ' admin-taken' : (!isAdmin && taken && !assigned ? ' taken' : '')}${past ? ' past' : ''}${today ? ' today' : ''}${assignedAndFuture ? ' assigned' : ''}${assignedAndPast ? ' assigned-past' : ''}${slViewable ? ' viewable' : ''}`}
-                            onClick={() => {
-                              if (!day) return;
-                              if (isAdmin) {
-                                if (past || taken) return; // Grayed out — no click
-                                handleLineupDateSelect(dateStr);
-                              } else {
-                                // Song Leader
-                                if (assignedAndPast) { showToast('This date has already passed. You cannot edit past lineups.', 'warning'); return; }
-                                if (taken) {
-                                  handleLineupDateSelect(dateStr);
-                                  return;
-                                }
-                              }
-                            }}
-                            title={isAdmin ? (taken ? `Assigned to ${leaderName}` : past ? 'Past date' : 'Click to assign') : (assignedAndFuture ? 'Your assigned date — click to add songs' : assignedAndPast ? 'Past assigned date' : slViewable ? `Assigned to ${leaderName} — click to view` : past ? 'Past date' : '')}>
-                            {day && <span className="lineup-cal-day-num">{day}</span>}
-                            {taken && day && leaderFirstName && <span className="lineup-cal-leader-name">{leaderFirstName}</span>}
-                            {assignedAndFuture && day && <div className="lineup-cal-dot" style={{ background: 'var(--accent)' }}></div>}
-                          </div>
-                        );
-                      })}
-                    </div>
-                    <div className="lineup-cal-legend">
-                      {isAdmin && <span><span className="legend-dot available"></span> Available</span>}
-                      <span><span className="legend-dot" style={{ background: '#bbb' }}></span> Assigned</span>
-                      {!isAdmin && <span><span className="legend-dot" style={{ background: 'var(--accent)' }}></span> You&apos;re Assigned</span>}
-                      <span><span className="legend-dot past"></span> Past Date</span>
-                    </div>
+            {/* SCHEDULES TAB */}
+            {pawTab === 'schedules' && (
+              <div className="paw-schedules-grid">
+                {pawSchedules.filter(s => new Date(s.scheduleDate) >= new Date(new Date().toDateString())).sort((a, b) => new Date(a.scheduleDate) - new Date(b.scheduleDate)).length === 0 && (
+                  <div className="paw-empty-state">
+                    <i className="fas fa-calendar-xmark"></i>
+                    <p>No upcoming schedule lineups found.</p>
+                    <span>Check back later for new assignments!</span>
                   </div>
-
-                  {/* Detail Popup — Song Leader viewing another date's assignment */}
-                  {lineupDetailPopup && (
-                    <div className="lineup-detail-overlay" onClick={() => setLineupDetailPopup(null)}>
-                      <div className="lineup-detail-modal" onClick={(e) => e.stopPropagation()}>
-                        <button className="lineup-detail-close" onClick={() => setLineupDetailPopup(null)}><i className="fas fa-times"></i></button>
-                        <div className="lineup-detail-modal-header">
-                          <i className="fas fa-calendar-day"></i>
-                          <h3>{formatDate(lineupDetailPopup.date)}</h3>
+                )}
+                {pawSchedules.filter(s => new Date(s.scheduleDate) >= new Date(new Date().toDateString())).sort((a, b) => new Date(a.scheduleDate) - new Date(b.scheduleDate)).map((schedule, idx) => (
+                  <div key={idx} className="paw-card-v2" onClick={() => setPawSelectedSchedule(schedule)}>
+                    {/* Card Header with date */}
+                    <div className="paw-card-v2-header">
+                      <div className="paw-card-v2-date">
+                        <span className="paw-card-v2-day">{new Date(schedule.scheduleDate + 'T00:00:00').getDate()}</span>
+                        <div className="paw-card-v2-month-year">
+                          <span>{new Date(schedule.scheduleDate + 'T00:00:00').toLocaleDateString('en-US', { month: 'short' })}</span>
+                          <span>{new Date(schedule.scheduleDate + 'T00:00:00').getFullYear()}</span>
                         </div>
-                        <div className="lineup-detail-modal-body">
-                          <div className="lineup-detail-row">
-                            <i className="fas fa-microphone" style={{ color: 'var(--primary)' }}></i>
-                            <div>
-                              <span className="lineup-detail-label">Song Leader</span>
-                              <span className="lineup-detail-value">{lineupDetailPopup.songLeader}</span>
-                            </div>
-                          </div>
-                          <div className="lineup-detail-row">
-                            <i className="fas fa-users" style={{ color: 'var(--secondary)' }}></i>
-                            <div>
-                              <span className="lineup-detail-label">Backupers</span>
-                              <span className="lineup-detail-value">{lineupDetailPopup.backupSingers.length > 0 ? lineupDetailPopup.backupSingers.join(', ') : 'No backupers assigned'}</span>
-                            </div>
-                          </div>
-                          {(lineupDetailPopup.slowSongs.length > 0 || lineupDetailPopup.fastSongs.length > 0) && (
-                            <div className="lineup-detail-songs">
-                              <span className="lineup-detail-label" style={{ marginBottom: 8, display: 'block' }}>Songs</span>
-                              {lineupDetailPopup.slowSongs.map((s, i) => <div key={`s-${i}`} className="lineup-detail-song-pill slow"><i className="fas fa-music"></i> {s.title}</div>)}
-                              {lineupDetailPopup.fastSongs.map((s, i) => <div key={`f-${i}`} className="lineup-detail-song-pill fast"><i className="fas fa-bolt"></i> {s.title}</div>)}
-                            </div>
+                      </div>
+                      <div className="paw-card-v2-weekday">{new Date(schedule.scheduleDate + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long' })}</div>
+                      {schedule.hasSubstitute && <span className="paw-sub-tag"><i className="fas fa-people-arrows"></i> Substituted</span>}
+                    </div>
+
+                    {/* Song Leader Section with Profile */}
+                    <div className="paw-card-v2-body">
+                      <div className="paw-card-v2-leader">
+                        <div className="paw-card-v2-avatar-wrapper">
+                          {schedule.songLeaderPicture ? (
+                            <img src={schedule.songLeaderPicture} alt="" className="paw-card-v2-avatar" referrerPolicy="no-referrer" />
+                          ) : (
+                            <div className="paw-card-v2-avatar paw-card-v2-avatar-initials">{getInitials(schedule.songLeader)}</div>
                           )}
+                          <span className="paw-card-v2-role-icon"><i className="fas fa-microphone"></i></span>
+                        </div>
+                        <div className="paw-card-v2-leader-info">
+                          <span className="paw-card-v2-label">{schedule.hasSubstitute ? 'Song Leader (Substitute)' : 'Song Leader'}</span>
+                          <span className="paw-card-v2-name">{schedule.songLeader}</span>
                         </div>
                       </div>
-                    </div>
-                  )}
-                </div>
-              )}
 
-              {/* FORM VIEW — after date is selected */}
-              {lineupView === 'form' && (
-                <div className="lineup-form-modern">
-                  {/* Selected Date Banner */}
-                  <div className="lineup-date-banner">
-                    <div className="lineup-date-banner-left">
-                      <i className="fas fa-calendar-check"></i>
-                      <div>
-                        <span className="lineup-date-label">Schedule Date</span>
-                        <span className="lineup-date-value">{formatDate(lineupForm.scheduleDate)}</span>
-                      </div>
-                    </div>
-                    {!editingLineup && isAdmin && <button className="btn-change-date" onClick={() => { setLineupView('calendar'); setLineupSelectedDate(null); }}><i className="fas fa-pen"></i> Change</button>}
-                    {!isAdmin && <button className="btn-change-date" onClick={() => { resetLineupForm(); }}><i className="fas fa-arrow-left"></i> Back</button>}
-                  </div>
+                      {/* Original Song Leader (grayed out) */}
+                      {schedule.hasSubstitute && schedule.originalSongLeader && (
+                        <div className="paw-card-v2-leader paw-card-v2-original">
+                          <div className="paw-card-v2-avatar-wrapper">
+                            {schedule.originalSongLeaderPicture ? (
+                              <img src={schedule.originalSongLeaderPicture} alt="" className="paw-card-v2-avatar" referrerPolicy="no-referrer" />
+                            ) : (
+                              <div className="paw-card-v2-avatar paw-card-v2-avatar-initials">{getInitials(schedule.originalSongLeader)}</div>
+                            )}
+                          </div>
+                          <div className="paw-card-v2-leader-info">
+                            <span className="paw-card-v2-label">Song Leader</span>
+                            <span className="paw-card-v2-name paw-grayed-out">{schedule.originalSongLeader}</span>
+                          </div>
+                        </div>
+                      )}
 
-                  {isAdmin ? (
-                    <>
-                      {/* ===== ADMIN FORM: Assign Song Leader + Backupers only ===== */}
-                      <div className="lineup-details-row">
-                        <div className="lineup-detail-card" style={{ flex: '1 1 100%' }}>
-                          <label><i className="fas fa-microphone"></i> Assign Song Leader</label>
-                          <select className="form-select lineup-leader-select" value={lineupForm.songLeader} onChange={(e) => handleLineupChange('songLeader', e.target.value)}>
-                            <option value="">-- Select Song Leader --</option>
-                            {songLeaderOptions.map((sl) => (
-                              <option key={sl.id} value={sl.name}>{sl.name}</option>
+                      {/* Backup Singers with Avatars */}
+                      {schedule.backupSingerProfiles?.length > 0 && (
+                        <div className="paw-card-v2-backups">
+                          <span className="paw-card-v2-label"><i className="fas fa-users"></i> Backup Singers</span>
+                          <div className="paw-card-v2-backup-list">
+                            {schedule.backupSingerProfiles.map((bp, i) => (
+                              <div key={i} className="paw-card-v2-backup-chip">
+                                {bp.profilePicture ? (
+                                  <img src={bp.profilePicture} alt="" className="paw-card-v2-backup-avatar" referrerPolicy="no-referrer" />
+                                ) : (
+                                  <span className="paw-card-v2-backup-avatar paw-card-v2-avatar-initials">{getInitials(bp.name)}</span>
+                                )}
+                                <span>{bp.name}</span>
+                              </div>
                             ))}
-                          </select>
-                          {songLeaderOptions.length === 0 && (
-                            <p style={{ color: '#aaa', fontSize: '0.82rem', margin: '8px 0 0' }}>
-                              <i className="fas fa-info-circle"></i> No Song Leaders found. Assign users with Ministry: Praise And Worship, Sub Role: Song Leaders.
-                            </p>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Practice & Songs footer */}
+                      <div className="paw-card-v2-meta">
+                        {schedule.practiceDate && (
+                          <span className="paw-card-v2-meta-item"><i className="fas fa-calendar-check"></i> Practice: {new Date(schedule.practiceDate + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
+                        )}
+                        <span className="paw-card-v2-meta-item"><i className="fas fa-music"></i> {(schedule.slowSongs?.length || 0) + (schedule.fastSongs?.length || 0)} Songs</span>
+                      </div>
+                    </div>
+
+                    <div className="paw-card-v2-footer">
+                      <button className="paw-view-btn-v2"><i className="fas fa-eye"></i> View Details</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* MY SCHEDULE TAB */}
+            {pawTab === 'my-schedule' && (
+              <div className="paw-my-schedule-container">
+                {pawMySchedules.length === 0 ? (
+                  <div className="paw-empty-state">
+                    <i className="fas fa-user-clock"></i>
+                    <p>No upcoming schedules assigned to you.</p>
+                    <span>When the Song Leader adds you to a lineup, it will appear here.</span>
+                  </div>
+                ) : (
+                  <div className="paw-schedules-grid">
+                    {pawMySchedules.map((schedule, idx) => (
+                      <div key={idx} className="paw-card-v2 paw-card-v2-my" onClick={() => setPawSelectedSchedule(schedule)}>
+                        {/* Role Badge */}
+                        <div className="paw-card-v2-role-badge" style={{ background: schedule.role === 'Song Leader' ? '#926c15' : schedule.role === 'Substitute Song Leader' ? '#28a745' : schedule.role?.includes('Substituted') ? '#6c757d' : '#17a2b8' }}>
+                          <i className={`fas ${schedule.role === 'Song Leader' ? 'fa-microphone' : schedule.role === 'Substitute Song Leader' ? 'fa-people-arrows' : schedule.role?.includes('Substituted') ? 'fa-user-slash' : 'fa-users'}`}></i>
+                          {schedule.role}
+                        </div>
+                        <div className="paw-card-v2-header">
+                          <div className="paw-card-v2-date">
+                            <span className="paw-card-v2-day">{new Date(schedule.scheduleDate + 'T00:00:00').getDate()}</span>
+                            <div className="paw-card-v2-month-year">
+                              <span>{new Date(schedule.scheduleDate + 'T00:00:00').toLocaleDateString('en-US', { month: 'short' })}</span>
+                              <span>{new Date(schedule.scheduleDate + 'T00:00:00').getFullYear()}</span>
+                            </div>
+                          </div>
+                          <div className="paw-card-v2-weekday">{new Date(schedule.scheduleDate + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long' })}</div>
+                          {schedule.hasSubstitute && <span className="paw-sub-tag"><i className="fas fa-people-arrows"></i> Substituted</span>}
+                        </div>
+
+                        <div className="paw-card-v2-body">
+                          <div className="paw-card-v2-leader">
+                            <div className="paw-card-v2-avatar-wrapper">
+                              {schedule.songLeaderPicture ? (
+                                <img src={schedule.songLeaderPicture} alt="" className="paw-card-v2-avatar" referrerPolicy="no-referrer" />
+                              ) : (
+                                <div className="paw-card-v2-avatar paw-card-v2-avatar-initials">{getInitials(schedule.songLeader)}</div>
+                              )}
+                              <span className="paw-card-v2-role-icon"><i className="fas fa-microphone"></i></span>
+                            </div>
+                            <div className="paw-card-v2-leader-info">
+                              <span className="paw-card-v2-label">{schedule.hasSubstitute ? 'Song Leader (Substitute)' : 'Song Leader'}</span>
+                              <span className="paw-card-v2-name">{schedule.songLeader}</span>
+                            </div>
+                          </div>
+
+                          {schedule.hasSubstitute && schedule.originalSongLeader && (
+                            <div className="paw-card-v2-leader paw-card-v2-original">
+                              <div className="paw-card-v2-avatar-wrapper">
+                                {schedule.originalSongLeaderPicture ? (
+                                  <img src={schedule.originalSongLeaderPicture} alt="" className="paw-card-v2-avatar" referrerPolicy="no-referrer" />
+                                ) : (
+                                  <div className="paw-card-v2-avatar paw-card-v2-avatar-initials">{getInitials(schedule.originalSongLeader)}</div>
+                                )}
+                              </div>
+                              <div className="paw-card-v2-leader-info">
+                                <span className="paw-card-v2-label">Song Leader</span>
+                                <span className="paw-card-v2-name paw-grayed-out">{schedule.originalSongLeader}</span>
+                              </div>
+                            </div>
                           )}
+
+                          {schedule.backupSingerProfiles?.length > 0 && (
+                            <div className="paw-card-v2-backups">
+                              <span className="paw-card-v2-label"><i className="fas fa-users"></i> Backup Singers</span>
+                              <div className="paw-card-v2-backup-list">
+                                {schedule.backupSingerProfiles.map((bp, i) => (
+                                  <div key={i} className="paw-card-v2-backup-chip">
+                                    {bp.profilePicture ? (
+                                      <img src={bp.profilePicture} alt="" className="paw-card-v2-backup-avatar" referrerPolicy="no-referrer" />
+                                    ) : (
+                                      <span className="paw-card-v2-backup-avatar paw-card-v2-avatar-initials">{getInitials(bp.name)}</span>
+                                    )}
+                                    <span>{bp.name}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          <div className="paw-card-v2-meta">
+                            {schedule.practiceDate && (
+                              <span className="paw-card-v2-meta-item"><i className="fas fa-calendar-check"></i> Practice: {new Date(schedule.practiceDate + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
+                            )}
+                            <span className="paw-card-v2-meta-item"><i className="fas fa-music"></i> {(schedule.slowSongs?.length || 0) + (schedule.fastSongs?.length || 0)} Songs</span>
+                          </div>
+                        </div>
+
+                        <div className="paw-card-v2-footer">
+                          <button className="paw-view-btn-v2"><i className="fas fa-eye"></i> View Details</button>
                         </div>
                       </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
 
-                      <div className="lineup-backup-section">
-                        <label><i className="fas fa-users"></i> Assign Backupers</label>
-                        {backupSingerOptions.length === 0 && (
-                          <p style={{ color: '#aaa', fontSize: '0.85rem', margin: '6px 0' }}>
-                            <i className="fas fa-info-circle"></i> No Backupers found. Assign users with Ministry: Praise And Worship, Sub Role: Song Leader Backupers.
-                          </p>
+            {/* NOTIFICATIONS TAB */}
+            {pawTab === 'notifications' && (
+              <div className="paw-notifications-container">
+                {pawNotifications.length === 0 ? (
+                  <div className="paw-empty-state">
+                    <i className="fas fa-bell-slash"></i>
+                    <p>No notifications yet.</p>
+                    <span>Lineup assignments and updates will appear here.</span>
+                  </div>
+                ) : (
+                  <div className="paw-notifications-list">
+                    {pawNotifications.map((notif, idx) => (
+                      <div key={idx} className={`paw-notif-card ${notif.is_read ? 'read' : 'unread'}`}
+                        onClick={async () => {
+                          if (!notif.is_read) {
+                            await fetch('/api/notifications', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: notif.id }) });
+                            loadPawNotifications();
+                          }
+                        }}
+                      >
+                        <div className="paw-notif-icon">
+                          <i className={`fas ${notif.type === 'lineup' ? 'fa-music' : notif.type === 'substitute' ? 'fa-people-arrows' : 'fa-bell'}`}></i>
+                        </div>
+                        <div className="paw-notif-content">
+                          <div className="paw-notif-title">{notif.title}</div>
+                          <div className="paw-notif-message">{notif.message}</div>
+                          <div className="paw-notif-time"><i className="fas fa-clock"></i> {new Date(notif.created_at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</div>
+                        </div>
+                        {!notif.is_read && <span className="paw-notif-dot"></span>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </section>
+
+          {/* PAW Schedule Detail Modal */}
+          {pawSelectedSchedule && (
+            <div className="paw-detail-modal-overlay" onClick={() => { setPawSelectedSchedule(null); setPawPlayingSong(null); }}>
+              <div className="paw-detail-modal paw-detail-modal-v2" onClick={(e) => e.stopPropagation()}>
+                <div className="paw-detail-modal-header-v2">
+                  <div className="paw-detail-modal-date-strip">
+                    <div className="paw-detail-modal-date-big">
+                      <span className="paw-detail-modal-day-num">{new Date(pawSelectedSchedule.scheduleDate + 'T00:00:00').getDate()}</span>
+                      <div className="paw-detail-modal-month-col">
+                        <span>{new Date(pawSelectedSchedule.scheduleDate + 'T00:00:00').toLocaleDateString('en-US', { month: 'long' })}</span>
+                        <span>{new Date(pawSelectedSchedule.scheduleDate + 'T00:00:00').getFullYear()}</span>
+                      </div>
+                    </div>
+                    <span className="paw-detail-modal-weekday">{new Date(pawSelectedSchedule.scheduleDate + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long' })}</span>
+                  </div>
+                  <button className="modal-close-btn" onClick={() => { setPawSelectedSchedule(null); setPawPlayingSong(null); }}><i className="fas fa-times"></i></button>
+                </div>
+
+                <div className="paw-detail-modal-body-v2">
+                  {/* People Section */}
+                  <div className="paw-detail-people-section">
+                    {/* Song Leader */}
+                    <div className="paw-detail-person-card">
+                      <div className="paw-detail-person-avatar-wrap">
+                        {pawSelectedSchedule.songLeaderPicture ? (
+                          <img src={pawSelectedSchedule.songLeaderPicture} alt="" className="paw-detail-person-avatar" referrerPolicy="no-referrer" />
+                        ) : (
+                          <div className="paw-detail-person-avatar paw-card-v2-avatar-initials">{getInitials(pawSelectedSchedule.songLeader)}</div>
                         )}
-                        <div className="lineup-backup-list">
-                          {lineupForm.backupSingers.map((singer, i) => (
-                            <div key={i} className="lineup-backup-item">
-                              <select className="form-select" value={singer} onChange={(e) => handleBackupChange(i, e.target.value)}>
-                                <option value="">Select backuper</option>
-                                {backupSingerOptions.map((bo) => <option key={bo.id} value={bo.name}>{bo.name}</option>)}
-                              </select>
-                              {lineupForm.backupSingers.length > 1 && <button className="btn-remove-sm" onClick={() => removeBackupSinger(i)}><i className="fas fa-times"></i></button>}
+                        <span className="paw-detail-person-role-icon"><i className="fas fa-microphone"></i></span>
+                      </div>
+                      <div className="paw-detail-person-info">
+                        <span className="paw-detail-person-role">{pawSelectedSchedule.hasSubstitute ? 'Song Leader (Substitute)' : 'Song Leader'}</span>
+                        <span className="paw-detail-person-name">{pawSelectedSchedule.songLeader}</span>
+                      </div>
+                    </div>
+
+                    {/* Original Song Leader */}
+                    {pawSelectedSchedule.hasSubstitute && pawSelectedSchedule.originalSongLeader && (
+                      <div className="paw-detail-person-card paw-detail-person-original">
+                        <div className="paw-detail-person-avatar-wrap">
+                          {pawSelectedSchedule.originalSongLeaderPicture ? (
+                            <img src={pawSelectedSchedule.originalSongLeaderPicture} alt="" className="paw-detail-person-avatar" referrerPolicy="no-referrer" />
+                          ) : (
+                            <div className="paw-detail-person-avatar paw-card-v2-avatar-initials">{getInitials(pawSelectedSchedule.originalSongLeader)}</div>
+                          )}
+                        </div>
+                        <div className="paw-detail-person-info">
+                          <span className="paw-detail-person-role">Song Leader</span>
+                          <span className="paw-detail-person-name paw-grayed-out">{pawSelectedSchedule.originalSongLeader}</span>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Backup Singers */}
+                    {pawSelectedSchedule.backupSingerProfiles?.length > 0 && (
+                      <div className="paw-detail-backups-row">
+                        <span className="paw-detail-backups-label"><i className="fas fa-users"></i> Backup Singers</span>
+                        <div className="paw-detail-backups-list">
+                          {pawSelectedSchedule.backupSingerProfiles.map((bp, i) => (
+                            <div key={i} className="paw-detail-backup-chip">
+                              {bp.profilePicture ? (
+                                <img src={bp.profilePicture} alt="" className="paw-detail-backup-avatar" referrerPolicy="no-referrer" />
+                              ) : (
+                                <span className="paw-detail-backup-avatar paw-card-v2-avatar-initials">{getInitials(bp.name)}</span>
+                              )}
+                              <span>{bp.name}</span>
                             </div>
                           ))}
                         </div>
-                        {lineupForm.backupSingers.length < 5 && <button className="btn-add-subtle" onClick={addBackupSinger}><i className="fas fa-plus"></i> Add Backuper</button>}
+                      </div>
+                    )}
+
+                    {/* Practice Date */}
+                    {pawSelectedSchedule.practiceDate && (
+                      <div className="paw-detail-practice-row">
+                        <i className="fas fa-calendar-check"></i>
+                        <span>Practice: {new Date(pawSelectedSchedule.practiceDate + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Songs Sections */}
+                  {pawSelectedSchedule.slowSongs?.length > 0 && (
+                    <div className="paw-detail-songs-section-v2">
+                      <h4 className="paw-detail-songs-heading"><i className="fas fa-music"></i> Slow Songs</h4>
+                      {pawSelectedSchedule.slowSongs.map((song, i) => {
+                        const songKey = `slow-${i}`;
+                        const vidId = extractYouTubeId(song.link);
+                        const isPlaying = pawPlayingSong?.key === songKey;
+                        return (
+                        <div key={i} className="paw-detail-song-card-v2">
+                          <div className="paw-detail-song-header">
+                            <p className="paw-detail-song-title-v2"><i className="fas fa-music"></i> {song.title}</p>
+                          </div>
+                          {song.link && vidId && (
+                            <div className="paw-audio-player-row paw-audio-col">
+                              <div className="paw-audio-top-row">
+                                <button className={`paw-audio-play-btn ${isPlaying ? 'playing' : ''}`} onClick={() => setPawPlayingSong(isPlaying ? null : { key: songKey, videoId: vidId })}>
+                                  <i className={`fas ${isPlaying ? 'fa-pause' : 'fa-play'}`}></i>
+                                </button>
+                                <div className="paw-audio-info">
+                                  <span className="paw-audio-label">{isPlaying ? 'Now Playing' : 'Play Audio'}</span>
+                                  <div className="paw-audio-wave">
+                                    {isPlaying && <><span></span><span></span><span></span><span></span><span></span></>}
+                                  </div>
+                                </div>
+                                <button className="paw-lyrics-btn" onClick={() => fetchSongLyrics(song.title, song.link)} title="View Lyrics">
+                                  <i className="fas fa-align-left"></i> Lyrics
+                                </button>
+                              </div>
+                              {isPlaying && (
+                                <div className="paw-audio-progress-wrap">
+                                  <span className="paw-audio-time">{formatPawTime(pawAudioTime.current)}</span>
+                                  <div className="paw-audio-progress" onClick={handlePawSeek}>
+                                    <div className="paw-audio-progress-fill" style={{ width: `${pawAudioTime.duration ? (pawAudioTime.current / pawAudioTime.duration * 100) : 0}%` }}></div>
+                                    <div className="paw-audio-progress-thumb" style={{ left: `${pawAudioTime.duration ? (pawAudioTime.current / pawAudioTime.duration * 100) : 0}%` }}></div>
+                                  </div>
+                                  <span className="paw-audio-time">{formatPawTime(pawAudioTime.duration)}</span>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                          {song.link && !vidId && (
+                            <div className="paw-audio-player-row">
+                              <a href={song.link} target="_blank" rel="noopener noreferrer" className="paw-external-link-btn"><i className="fas fa-external-link-alt"></i> Open Link</a>
+                              <button className="paw-lyrics-btn" onClick={() => fetchSongLyrics(song.title, song.link)} title="View Lyrics">
+                                <i className="fas fa-align-left"></i> Lyrics
+                              </button>
+                            </div>
+                          )}
+                          {!song.link && (
+                            <div className="paw-audio-player-row">
+                              <button className="paw-lyrics-btn" onClick={() => fetchSongLyrics(song.title)} title="View Lyrics">
+                                <i className="fas fa-align-left"></i> Lyrics
+                              </button>
+                            </div>
+                          )}
+                          {song.instructions && <p className="paw-song-instructions-v2"><i className="fas fa-info-circle"></i> {song.instructions}</p>}
+                        </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                  {pawSelectedSchedule.fastSongs?.length > 0 && (
+                    <div className="paw-detail-songs-section-v2">
+                      <h4 className="paw-detail-songs-heading"><i className="fas fa-bolt"></i> Fast Songs</h4>
+                      {pawSelectedSchedule.fastSongs.map((song, i) => {
+                        const songKey = `fast-${i}`;
+                        const vidId = extractYouTubeId(song.link);
+                        const isPlaying = pawPlayingSong?.key === songKey;
+                        return (
+                        <div key={i} className="paw-detail-song-card-v2">
+                          <div className="paw-detail-song-header">
+                            <p className="paw-detail-song-title-v2"><i className="fas fa-bolt"></i> {song.title}</p>
+                          </div>
+                          {song.link && vidId && (
+                            <div className="paw-audio-player-row paw-audio-col">
+                              <div className="paw-audio-top-row">
+                                <button className={`paw-audio-play-btn ${isPlaying ? 'playing' : ''}`} onClick={() => setPawPlayingSong(isPlaying ? null : { key: songKey, videoId: vidId })}>
+                                  <i className={`fas ${isPlaying ? 'fa-pause' : 'fa-play'}`}></i>
+                                </button>
+                                <div className="paw-audio-info">
+                                  <span className="paw-audio-label">{isPlaying ? 'Now Playing' : 'Play Audio'}</span>
+                                  <div className="paw-audio-wave">
+                                    {isPlaying && <><span></span><span></span><span></span><span></span><span></span></>}
+                                  </div>
+                                </div>
+                                <button className="paw-lyrics-btn" onClick={() => fetchSongLyrics(song.title, song.link)} title="View Lyrics">
+                                  <i className="fas fa-align-left"></i> Lyrics
+                                </button>
+                              </div>
+                              {isPlaying && (
+                                <div className="paw-audio-progress-wrap">
+                                  <span className="paw-audio-time">{formatPawTime(pawAudioTime.current)}</span>
+                                  <div className="paw-audio-progress" onClick={handlePawSeek}>
+                                    <div className="paw-audio-progress-fill" style={{ width: `${pawAudioTime.duration ? (pawAudioTime.current / pawAudioTime.duration * 100) : 0}%` }}></div>
+                                    <div className="paw-audio-progress-thumb" style={{ left: `${pawAudioTime.duration ? (pawAudioTime.current / pawAudioTime.duration * 100) : 0}%` }}></div>
+                                  </div>
+                                  <span className="paw-audio-time">{formatPawTime(pawAudioTime.duration)}</span>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                          {song.link && !vidId && (
+                            <div className="paw-audio-player-row">
+                              <a href={song.link} target="_blank" rel="noopener noreferrer" className="paw-external-link-btn"><i className="fas fa-external-link-alt"></i> Open Link</a>
+                              <button className="paw-lyrics-btn" onClick={() => fetchSongLyrics(song.title, song.link)} title="View Lyrics">
+                                <i className="fas fa-align-left"></i> Lyrics
+                              </button>
+                            </div>
+                          )}
+                          {!song.link && (
+                            <div className="paw-audio-player-row">
+                              <button className="paw-lyrics-btn" onClick={() => fetchSongLyrics(song.title)} title="View Lyrics">
+                                <i className="fas fa-align-left"></i> Lyrics
+                              </button>
+                            </div>
+                          )}
+                          {song.instructions && <p className="paw-song-instructions-v2"><i className="fas fa-info-circle"></i> {song.instructions}</p>}
+                        </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Hidden YouTube Player Container */}
+          <div id="paw-yt-player-wrapper" style={{ position: 'fixed', top: '-9999px', left: '-9999px', width: 0, height: 0, overflow: 'hidden', pointerEvents: 'none' }}>
+            <div id="paw-yt-player-el"></div>
+          </div>
+
+          {/* PAW Lyrics Popup Modal */}
+          {pawLyricsModal && (
+            <div className="paw-lyrics-modal-overlay" onClick={() => setPawLyricsModal(null)}>
+              <div className="paw-lyrics-modal" onClick={(e) => e.stopPropagation()}>
+                <div className="paw-lyrics-modal-header">
+                  <div className="paw-lyrics-modal-title-row">
+                    <div className="paw-lyrics-modal-icon"><i className="fas fa-music"></i></div>
+                    <div>
+                      <h3>{pawLyricsModal.title || 'Song Lyrics'}</h3>
+                      {pawLyricsModal.artist && <span className="paw-lyrics-modal-artist">{pawLyricsModal.artist}</span>}
+                    </div>
+                  </div>
+                  <button className="modal-close-btn" onClick={() => setPawLyricsModal(null)}><i className="fas fa-times"></i></button>
+                </div>
+                <div className="paw-lyrics-modal-body">
+                  {pawLyricsModal.loading ? (
+                    <div className="paw-lyrics-loading">
+                      <i className="fas fa-spinner fa-spin"></i>
+                      <p>Fetching lyrics...</p>
+                    </div>
+                  ) : pawLyricsModal.lyrics ? (
+                    <pre className="paw-lyrics-text">{pawLyricsModal.lyrics}</pre>
+                  ) : (
+                    <div className="paw-lyrics-not-found">
+                      <i className="fas fa-search"></i>
+                      <p>No lyrics found for this song.</p>
+                      <span>Try searching with the exact song title and artist (e.g. &quot;Joy - Planetshakers&quot;).</span>
+                    </div>
+                  )}
+                </div>
+                <div className="paw-lyrics-modal-footer">
+                  <span className="paw-lyrics-source-text"><i className="fas fa-robot"></i> Lyrics powered by AI</span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ========== LINEUP SECTION (Merged: Assign + All Assignments) ========== */}
+          {canManage(MODULES.CREATE_SONG_LIST) && (
+            <section className={`content-section ${activeSection === 'create-lineup' ? 'active' : ''}`}>
+              {/* Tab Switcher */}
+              <div className="lu-tab-bar">
+                <button className={`lu-tab ${lineupTab === 'assign' ? 'active' : ''}`} onClick={() => { setLineupTab('assign'); if (lineupTab !== 'assign') { resetLineupForm(); } }}>
+                  <i className="fas fa-music"></i> {isAdmin ? 'Assign Lineup' : 'Create Lineup'}
+                  {isAdmin && (getPendingAdminSubs().length > 0) && <span className="lu-tab-badge">{getPendingAdminSubs().length}</span>}
+                  {!isAdmin && getOpenSubsForMe().length > 0 && <span className="lu-tab-badge sub">{getOpenSubsForMe().length}</span>}
+                </button>
+                <button className={`lu-tab ${lineupTab === 'all' ? 'active' : ''}`} onClick={() => { setLineupTab('all'); loadScheduleData(); }}>
+                  <i className="fas fa-list-ol"></i> {isAdmin ? 'All Assignments' : 'My Lineups'}
+                </button>
+                <button className={`lu-tab ${lineupTab === 'paw-logs' ? 'active' : ''}`} onClick={() => { setLineupTab('paw-logs'); loadLineupExcuses(); loadSubRequests(); if (isAdmin) loadPawMembers(); }}>
+                  <i className={`fas ${isAdmin ? 'fa-clipboard-list' : 'fa-history'}`}></i> {isAdmin ? 'PAW Logs' : 'Excuse History'}
+                  {isAdmin && (getPendingExcuses().length + getPendingAdminSubs().length) > 0 && <span className="lu-tab-badge">{getPendingExcuses().length + getPendingAdminSubs().length}</span>}
+                </button>
+              </div>
+
+              {/* ===== ASSIGN TAB ===== */}
+              {lineupTab === 'assign' && (
+                <>
+                  {/* SUCCESS VIEW */}
+                  {lineupView === 'success' && (
+                    <div className="lineup-success-container">
+                      <div className="lineup-success-icon"><i className="fas fa-check-circle"></i></div>
+                      <h3>{isAdmin ? (editingLineup ? 'Assignment Updated!' : 'Lineup Assigned!') : (editingLineup ? 'Songs Updated!' : 'Songs Submitted!')}</h3>
+                      <p>{isAdmin ? <>Song Leader and Backup Singers have been {editingLineup ? 'updated' : 'assigned'} for <strong>{formatDate(lineupForm.scheduleDate)}</strong>. The Song Leader will be notified.</> : <>Your songs for <strong>{formatDate(lineupForm.scheduleDate)}</strong> have been {editingLineup ? 'updated' : 'saved'}.</>}</p>
+                      <div style={{ display: 'flex', gap: 10, justifyContent: 'center', marginTop: 20 }}>
+                        <button className="btn-primary" onClick={resetLineupForm} style={{ padding: '12px 30px' }}><i className="fas fa-plus"></i> {isAdmin ? 'Assign Another' : 'Back to Calendar'}</button>
+                        <button className="btn-secondary" onClick={() => { resetLineupForm(); setLineupTab('all'); }} style={{ padding: '12px 30px' }}><i className="fas fa-list-ol"></i> View All</button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* ADMIN PENDING EXCUSE NOTIFICATIONS */}
+                  {lineupView !== 'success' && isAdmin && getPendingExcuses().length > 0 && (
+                    <div className="lu-excuse-admin-card">
+                      <div className="lu-excuse-admin-header">
+                        <i className="fas fa-bell"></i>
+                        <span>Pending Excuse Requests <span className="lu-excuse-admin-badge">{getPendingExcuses().length}</span></span>
+                      </div>
+                      <div className="lu-excuse-admin-body">
+                        {getPendingExcuses().map(exc => (
+                          <div key={exc.id} className="lu-excuse-admin-item">
+                            <div className="lu-excuse-admin-item-info">
+                              <strong>{exc.user_name}</strong>
+                              <span className="lu-excuse-admin-date"><i className="fas fa-calendar-day"></i> {formatDate(exc.excuse_date)}</span>
+                              <p className="lu-excuse-admin-reason"><i className="fas fa-quote-left"></i> {exc.reason}</p>
+                            </div>
+                            <div className="lu-excuse-admin-actions">
+                              <button className="btn-small btn-success" onClick={() => reviewExcuse(exc.id, 'Approved')} title="Approve"><i className="fas fa-check"></i></button>
+                              <button className="btn-small btn-danger" onClick={() => reviewExcuse(exc.id, 'Rejected')} title="Reject"><i className="fas fa-times"></i></button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* ADMIN PENDING SUBSTITUTE REQUESTS */}
+                  {lineupView !== 'success' && isAdmin && getPendingAdminSubs().length > 0 && (
+                    <div className="lu-excuse-admin-card lu-sub-admin-card">
+                      <div className="lu-excuse-admin-header lu-sub-admin-header">
+                        <i className="fas fa-people-arrows"></i>
+                        <span>Pending Substitute Requests <span className="lu-excuse-admin-badge">{getPendingAdminSubs().length}</span></span>
+                      </div>
+                      <div className="lu-excuse-admin-body">
+                        {getPendingAdminSubs().map(sub => (
+                          <div key={sub.id} className="lu-excuse-admin-item lu-sub-admin-item">
+                            <div className="lu-sub-admin-profile">
+                              <div className="lu-sub-admin-avatar">
+                                {sub.requester_profile_picture ? <img src={sub.requester_profile_picture} alt="" referrerPolicy="no-referrer" /> : <span>{getInitials(sub.requester_name)}</span>}
+                              </div>
+                              <div className="lu-excuse-admin-item-info">
+                                <strong>{sub.requester_name}</strong>
+                                <span className="lu-excuse-admin-date"><i className="fas fa-calendar-day"></i> {formatDate(sub.schedule_date)}</span>
+                                <p className="lu-excuse-admin-reason"><i className="fas fa-quote-left"></i> {sub.reason}</p>
+                              </div>
+                            </div>
+                            <div className="lu-excuse-admin-actions">
+                              <button className="btn-small btn-success" onClick={() => adminReviewSub(sub.id, 'approve')} title="Approve & Notify All Song Leaders"><i className="fas fa-check"></i></button>
+                              <button className="btn-small btn-danger" onClick={() => adminReviewSub(sub.id, 'reject')} title="Reject"><i className="fas fa-times"></i></button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* CALENDAR + FORM SIDE BY SIDE (Admin) */}
+                  {lineupView !== 'success' && isAdmin && (
+                    <div className="lu-split-layout">
+                      {/* LEFT: Calendar */}
+                      <div className="lu-split-left">
+                        <div className="lineup-calendar-info">
+                          <i className="fas fa-info-circle"></i>
+                          <span>Select a date to assign a Song Leader and Backup Singers</span>
+                        </div>
+                        <div className="lineup-calendar-card">
+                          <div className="lineup-cal-header">
+                            <button onClick={() => setLineupCalendarMonth(new Date(lineupCalendarMonth.getFullYear(), lineupCalendarMonth.getMonth() - 1))}><i className="fas fa-chevron-left"></i></button>
+                            <h3>{lineupCalendarMonth.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</h3>
+                            <button onClick={() => setLineupCalendarMonth(new Date(lineupCalendarMonth.getFullYear(), lineupCalendarMonth.getMonth() + 1))}><i className="fas fa-chevron-right"></i></button>
+                          </div>
+                          <div className="lineup-cal-weekdays">
+                            {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(d => <div key={d} className="lineup-cal-weekday">{d}</div>)}
+                          </div>
+                          <div className="lineup-cal-grid">
+                            {getLineupCalendarDays().map((day, i) => {
+                              const taken = isLineupDateTaken(day);
+                              const past = isLineupDatePast(day);
+                              const today = day && new Date().getDate() === day && new Date().getMonth() === lineupCalendarMonth.getMonth() && new Date().getFullYear() === lineupCalendarMonth.getFullYear();
+                              const dateStr = day ? `${lineupCalendarMonth.getFullYear()}-${String(lineupCalendarMonth.getMonth() + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}` : '';
+                              const schedule = day && taken ? scheduleData.find(s => s.scheduleDate === dateStr) : null;
+                              const leaderName = schedule ? schedule.songLeader : '';
+                              const leaderFirstName = leaderName ? leaderName.split(' ')[0] : '';
+                              const isSelected = dateStr === lineupSelectedDate;
+                              const hasSub = schedule?.hasSubstitute;
+                              return (
+                                <div key={i} className={`lineup-cal-day${!day ? ' empty' : ''}${taken ? ' admin-taken' : ''}${past ? ' past' : ''}${today ? ' today' : ''}${isSelected ? ' selected' : ''}${hasSub ? ' has-sub' : ''}`}
+                                  onClick={() => { if (!day || past || taken) return; handleLineupDateSelect(dateStr); }}
+                                  title={hasSub ? `${leaderName} (original: ${schedule.originalSongLeader})` : taken ? `Assigned to ${leaderName}` : past ? 'Past date' : 'Click to assign'}>
+                                  {day && <span className="lineup-cal-day-num">{day}</span>}
+                                  {taken && day && leaderFirstName && <span className="lineup-cal-leader-name">{leaderFirstName}</span>}
+                                  {hasSub && day && <span className="lineup-cal-sub-dot" title="Substituted"><i className="fas fa-people-arrows"></i></span>}
+                                </div>
+                              );
+                            })}
+                          </div>
+                          <div className="lineup-cal-legend">
+                            <span><span className="legend-dot available"></span> Available</span>
+                            <span><span className="legend-dot" style={{ background: '#bbb' }}></span> Assigned</span>
+                            <span><span className="legend-dot" style={{ background: '#9c27b0' }}></span> Substituted</span>
+                            <span><span className="legend-dot past"></span> Past Date</span>
+                          </div>
+                        </div>
                       </div>
 
-                      {/* Submit (Admin) */}
-                      <div className="lineup-submit-row">
-                        <button className="btn-secondary" onClick={resetLineupForm}><i className="fas fa-arrow-left"></i> Cancel</button>
-                        <button className="btn-primary btn-submit-lineup" onClick={submitLineup} disabled={lineupLoading}>
-                          {lineupLoading ? <><div className="spinner" style={{ display: 'inline-block', width: 18, height: 18, marginRight: 8 }}></div> Saving...</> : <><i className="fas fa-user-check"></i> {editingLineup ? 'Update Assignment' : 'Assign Lineup'}</>}
-                        </button>
+                      {/* RIGHT: Assignment Form Card */}
+                      <div className="lu-split-right">
+                        {!lineupSelectedDate && !editingLineup ? (
+                          <div className="lu-empty-right">
+                            <i className="fas fa-hand-pointer"></i>
+                            <h4>Select a Date</h4>
+                            <p>Click an available date on the calendar to start assigning a Song Leader and Backup Singers.</p>
+                          </div>
+                        ) : (
+                          <div className="lu-assign-card">
+                            <div className="lu-assign-card-header">
+                              <div className="lu-assign-date-info">
+                                <i className="fas fa-calendar-check"></i>
+                                <div>
+                                  <span className="lu-assign-date-label">Schedule Date</span>
+                                  <span className="lu-assign-date-value">{formatDate(lineupForm.scheduleDate)}</span>
+                                </div>
+                              </div>
+                              {!editingLineup && <button className="lu-change-date-btn" onClick={() => setLineupSelectedDate(null)}><i className="fas fa-times"></i></button>}
+                            </div>
+
+                            <div className="lu-assign-card-body">
+                              {/* Song Leader Dropdown with profiles */}
+                              <div className="lu-field-group">
+                                <label><i className="fas fa-microphone"></i> Song Leader</label>
+                                <div className="lu-profile-select-wrapper">
+                                  <select className="form-select lu-profile-select" value={lineupForm.songLeader} onChange={(e) => handleSongLeaderChange(e.target.value)}>
+                                    <option value="">-- Select Song Leader --</option>
+                                    {songLeaderOptions.map((sl) => {
+                                      const excuse = lineupForm.scheduleDate ? getExcuseForLeaderOnDate(sl.name, lineupForm.scheduleDate) : null;
+                                      const isExcused = !!excuse;
+                                      return <option key={sl.id} value={sl.name} disabled={isExcused} style={isExcused ? { color: '#999' } : {}}>{sl.name}{isExcused ? ` ⛔ (Excused – ${excuse.status})` : ''}</option>;
+                                    })}
+                                  </select>
+                                  {lineupForm.songLeader && (() => { const sl = songLeaderOptions.find(o => o.name === lineupForm.songLeader); const excuse = lineupForm.scheduleDate ? getExcuseForLeaderOnDate(sl?.name, lineupForm.scheduleDate) : null; return sl ? (
+                                    <div className={`lu-selected-user-chip${excuse ? ' excused' : ''}`}>
+                                      <div className="lu-chip-avatar">{sl.profile_picture ? <img src={sl.profile_picture} alt="" /> : <span>{sl.name.split(' ').map(n => n[0]).join('')}</span>}</div>
+                                      <span>{sl.name}</span>
+                                      {excuse && <span className="lu-excused-tag"><i className="fas fa-ban"></i> {excuse.status}</span>}
+                                    </div>
+                                  ) : null; })()}
+                                </div>
+                                {lineupForm.scheduleDate && songLeaderOptions.some(sl => getExcuseForLeaderOnDate(sl.name, lineupForm.scheduleDate)) && (
+                                  <p className="lu-field-hint excuse-hint"><i className="fas fa-info-circle"></i> Grayed out leaders have filed an excuse for this date.</p>
+                                )}
+                                {songLeaderOptions.length === 0 && <p className="lu-field-hint"><i className="fas fa-info-circle"></i> No Song Leaders found. Assign users with Ministry: Praise And Worship, Sub Role: Song Leaders.</p>}
+                              </div>
+
+                              {/* Backup Singers — single dropdown + chips */}
+                              <div className="lu-field-group">
+                                <label><i className="fas fa-users"></i> Backup Singers</label>
+                                {backupSingerOptions.length === 0 && <p className="lu-field-hint"><i className="fas fa-info-circle"></i> No Backup Singers found. Assign users with Ministry: Praise And Worship, Sub Role: Backup Singer.</p>}
+                                
+                                {/* Selected backup singers as chips */}
+                                {lineupForm.backupSingers.filter(Boolean).length > 0 && (
+                                  <div className="lu-backup-chips">
+                                    {lineupForm.backupSingers.filter(Boolean).map((singer) => {
+                                      const bo = backupSingerOptions.find(o => o.name === singer);
+                                      return (
+                                        <div key={singer} className="lu-backup-chip">
+                                          <div className="lu-chip-avatar small">{bo?.profile_picture ? <img src={bo.profile_picture} alt="" /> : <span>{singer.split(' ').map(n => n[0]).join('')}</span>}</div>
+                                          <span>{singer}</span>
+                                          <button className="lu-chip-remove" onClick={() => removeBackupSinger(singer)}><i className="fas fa-times"></i></button>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                )}
+                                
+                                {/* Dropdown to add more (only shows un-selected singers, excludes song leader) */}
+                                {getAvailableBackupSingers().length > 0 && lineupForm.backupSingers.filter(Boolean).length < 5 && (
+                                  <select className="form-select lu-add-backup-select" value="" onChange={(e) => { addBackupSingerByName(e.target.value); }}>
+                                    <option value="">+ Add Backup Singer</option>
+                                    {getAvailableBackupSingers().map((b) => <option key={b.id} value={b.name}>{b.name}</option>)}
+                                  </select>
+                                )}
+                                {getAvailableBackupSingers().length === 0 && lineupForm.backupSingers.filter(Boolean).length > 0 && backupSingerOptions.length > 0 && (
+                                  <p className="lu-field-hint"><i className="fas fa-check-circle" style={{color: 'var(--primary)'}}></i> All available backup singers have been added.</p>
+                                )}
+                              </div>
+                            </div>
+
+                            <div className="lu-assign-card-footer">
+                              <button className="btn-secondary" onClick={resetLineupForm}><i className="fas fa-times"></i> Cancel</button>
+                              <button className="btn-primary" onClick={submitLineup} disabled={lineupLoading}>
+                                {lineupLoading ? <><div className="spinner" style={{ display: 'inline-block', width: 18, height: 18, marginRight: 8 }}></div> Saving...</> : <><i className="fas fa-user-check"></i> {editingLineup ? 'Update' : 'Assign Lineup'}</>}
+                              </button>
+                            </div>
+                          </div>
+                        )}
                       </div>
-                    </>
-                  ) : (
-                    <>
-                      {/* ===== SONG LEADER FORM: View assignment + add songs ===== */}
-                      {/* Assignment Info (read-only) */}
+                    </div>
+                  )}
+
+                  {/* SONG LEADER CALENDAR VIEW (non-admin) — 2-col: calendar + info cards */}
+                  {lineupView === 'calendar' && !isAdmin && (
+                    <div className="lu-sl-layout">
+                      {/* LEFT: Calendar */}
+                      <div className="lu-sl-calendar">
+                        <div className="lineup-calendar-info">
+                          <i className="fas fa-info-circle"></i>
+                          <span>Tap your assigned date to add songs. Tap a free date to file an excuse.</span>
+                        </div>
+
+                        <div className="lineup-calendar-card">
+                          <div className="lineup-cal-header">
+                            <button onClick={() => setLineupCalendarMonth(new Date(lineupCalendarMonth.getFullYear(), lineupCalendarMonth.getMonth() - 1))}><i className="fas fa-chevron-left"></i></button>
+                            <h3>{lineupCalendarMonth.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</h3>
+                            <button onClick={() => setLineupCalendarMonth(new Date(lineupCalendarMonth.getFullYear(), lineupCalendarMonth.getMonth() + 1))}><i className="fas fa-chevron-right"></i></button>
+                          </div>
+                          <div className="lineup-cal-weekdays">
+                            {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(d => <div key={d} className="lineup-cal-weekday">{d}</div>)}
+                          </div>
+                          <div className="lineup-cal-grid">
+                            {getLineupCalendarDays().map((day, i) => {
+                              const taken = isLineupDateTaken(day);
+                              const past = isLineupDatePast(day);
+                              const today = day && new Date().getDate() === day && new Date().getMonth() === lineupCalendarMonth.getMonth() && new Date().getFullYear() === lineupCalendarMonth.getFullYear();
+                              const dateStr = day ? `${lineupCalendarMonth.getFullYear()}-${String(lineupCalendarMonth.getMonth() + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}` : '';
+                              const schedule = day && taken ? scheduleData.find(s => s.scheduleDate === dateStr) : null;
+                              const leaderName = schedule ? schedule.songLeader : '';
+                              const leaderFirstName = leaderName ? leaderName.split(' ')[0] : '';
+                              const assigned = day && getAssignedDates().includes(dateStr);
+                              const assignedAndPast = assigned && past;
+                              const assignedAndFuture = assigned && !past;
+                              const slViewable = day && taken && !assigned;
+                              const myExcuse = day && !past ? getMyExcuseForDate(dateStr) : null;
+                              const hasExcuse = !!myExcuse;
+                              const mySub = day ? getSubForDate(dateStr) : null;
+                              const hasSub = !!mySub;
+                              const subAccepted = hasSub && mySub.status === 'Accepted';
+                              const isMySubDate = day && isSubstituteDateForMe(dateStr);
+                              const isMySubDateFuture = isMySubDate && !past;
+                              return (
+                                <div key={i} className={`lineup-cal-day${!day ? ' empty' : ''}${!isAdmin && taken && !assigned && !isMySubDate ? ' taken' : ''}${past ? ' past' : ''}${today ? ' today' : ''}${assignedAndFuture && !subAccepted ? ' assigned' : ''}${assignedAndPast ? ' assigned-past' : ''}${slViewable && !isMySubDate ? ' viewable' : ''}${hasExcuse ? ' excused' : ''}${subAccepted ? ' sub-excused' : ''}${isMySubDateFuture ? ' sub-assigned' : ''}`}
+                                  onClick={() => {
+                                    if (!day) return;
+                                    if (past && !isMySubDate && !assigned && !subAccepted) return;
+                                    if (assignedAndPast && !subAccepted) { showToast('This date has already passed.', 'warning'); return; }
+                                    if (subAccepted) { handleLineupDateSelect(dateStr); return; }
+                                    if (isMySubDateFuture) { handleLineupDateSelect(dateStr); return; }
+                                    if (taken) { handleLineupDateSelect(dateStr); return; }
+                                    if (!past && !taken) { setExcuseModalDate(dateStr); setExcuseReason(''); return; }
+                                  }}
+                                  title={isMySubDateFuture ? 'You\'re substituting — click to add songs' : subAccepted ? `Excused — Substituted by ${mySub.substitute_name}` : assignedAndFuture ? 'Your assigned date — click to add songs' : assignedAndPast ? 'Past assigned date' : slViewable ? `Assigned to ${leaderName} — click to view` : hasExcuse ? `Excused (${myExcuse.status})` : past ? 'Past date' : 'Click to file an excuse'}>
+                                  {day && <span className="lineup-cal-day-num">{day}</span>}
+                                  {subAccepted && day && <span className="lineup-cal-leader-name sub-label">{mySub.substitute_name?.split(' ')[0]}</span>}
+                                  {taken && day && leaderFirstName && !isMySubDate && !subAccepted && <span className="lineup-cal-leader-name">{leaderFirstName}</span>}
+                                  {isMySubDateFuture && day && <span className="lineup-cal-leader-name sub-label">SUB</span>}
+                                  {assignedAndFuture && !subAccepted && day && <div className="lineup-cal-dot" style={{ background: 'var(--accent)' }}></div>}
+                                  {subAccepted && day && <div className="lineup-cal-dot" style={{ background: '#17a2b8' }}></div>}
+                                  {isMySubDateFuture && day && <div className="lineup-cal-dot" style={{ background: '#9c27b0' }}></div>}
+                                  {hasExcuse && !hasSub && day && <div className="lineup-cal-dot" style={{ background: myExcuse.status === 'Approved' ? '#28a745' : myExcuse.status === 'Rejected' ? '#dc3545' : '#ffc107' }}></div>}
+                                </div>
+                              );
+                            })}
+                          </div>
+                          <div className="lineup-cal-legend">
+                            <span><span className="legend-dot" style={{ background: '#bbb' }}></span> Assigned</span>
+                            <span><span className="legend-dot" style={{ background: 'var(--accent)' }}></span> You&apos;re Assigned</span>
+                            <span><span className="legend-dot" style={{ background: '#9c27b0' }}></span> You&apos;re Subbing</span>
+                            <span><span className="legend-dot" style={{ background: '#17a2b8' }}></span> Substituted</span>
+                            <span><span className="legend-dot" style={{ background: '#ffc107' }}></span> Excused</span>
+                            <span><span className="legend-dot past"></span> Past Date</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* RIGHT: Info Cards */}
+                      <div className="lu-sl-cards">
+                        {/* Card 1: Your Assigned Dates This Month */}
+                        <div className="lu-info-card">
+                          <div className="lu-info-card-header gold">
+                            <i className="fas fa-star"></i>
+                            <span>Your Assigned Dates</span>
+                          </div>
+                          <div className="lu-info-card-body">
+                            {getAssignedDates().length === 0 && getAcceptedSubsAsSubstitute().length === 0 ? (
+                              <p className="lu-info-empty"><i className="fas fa-calendar-times"></i> No assigned dates yet. Admin will assign you.</p>
+                            ) : (
+                              <div className="lu-info-dates-list">
+                                {getAssignedDates().map(dateStr => {
+                                  const backups = getAssignedBackups(dateStr);
+                                  const isPast = new Date(dateStr + 'T00:00:00') < new Date(new Date().toDateString());
+                                  const hasSongs = (() => {
+                                    const sch = scheduleData.find(s => s.scheduleDate === dateStr);
+                                    return sch && ((sch.slowSongs?.length > 0 && sch.slowSongs.some(ss => ss.title)) || (sch.fastSongs?.length > 0 && sch.fastSongs.some(ss => ss.title)));
+                                  })();
+                                  const mySub = getSubForDate(dateStr);
+                                  const schedule = scheduleData.find(s => s.scheduleDate === dateStr);
+                                  return (
+                                    <div key={dateStr} className={`lu-info-date-item${isPast ? ' past' : ''}${mySub?.status === 'Accepted' ? ' sub-excused' : ''}`}>
+                                      <div className="lu-info-date-top-row" onClick={() => { if (!isPast) handleLineupDateSelect(dateStr); }}>
+                                        <div className="lu-info-date-left">
+                                          <span className="lu-info-date-day">{new Date(dateStr + 'T00:00:00').getDate()}</span>
+                                          <span className="lu-info-date-month">{new Date(dateStr + 'T00:00:00').toLocaleDateString('en-US', { month: 'short' })}</span>
+                                        </div>
+                                        <div className="lu-info-date-right">
+                                          <span className="lu-info-date-full">{formatDate(dateStr)}{isPast ? ' (Past)' : ''}</span>
+                                          {backups.length > 0 && <span className="lu-info-date-backups"><i className="fas fa-users"></i> {backups.join(', ')}</span>}
+                                          {!isPast && !mySub && hasSongs && <span className="lu-info-songs-ok"><i className="fas fa-check-circle"></i> Songs added</span>}
+                                          {!isPast && !mySub && !hasSongs && <span className="lu-info-songs-missing"><i className="fas fa-exclamation-triangle"></i> Songs needed</span>}
+                                          {mySub && mySub.status === 'Pending Admin' && <span className="lu-sub-status pending"><i className="fas fa-clock"></i> Sub request pending</span>}
+                                          {mySub && mySub.status === 'Open for Sub' && <span className="lu-sub-status open"><i className="fas fa-broadcast-tower"></i> Open for sub</span>}
+                                          {mySub && mySub.status === 'Accepted' && <span className="lu-sub-status accepted"><i className="fas fa-user-check"></i> Substituted by {mySub.substitute_name}</span>}
+                                        </div>
+                                      </div>
+                                      {/* Sub action buttons */}
+                                      {!isPast && !mySub && (
+                                        <button className="lu-sub-request-btn" onClick={(e) => { e.stopPropagation(); setSubModalDate(dateStr); setSubModalScheduleId(schedule?.scheduleId || null); setSubReason(''); }} title="Request a substitute Song Leader">
+                                          <i className="fas fa-people-arrows"></i> Request Substitute
+                                        </button>
+                                      )}
+                                      {!isPast && mySub && mySub.status === 'Pending Admin' && (
+                                        <button className="lu-sub-cancel-btn" onClick={(e) => { e.stopPropagation(); cancelSubRequest(mySub.id); }}>
+                                          <i className="fas fa-times"></i> Cancel Sub Request
+                                        </button>
+                                      )}
+                                      {!isPast && mySub && mySub.status === 'Accepted' && !mySub.thank_you_sent && (
+                                        <button className="lu-sub-thankyou-btn" onClick={(e) => { e.stopPropagation(); setSubThankYouModal({ subId: mySub.id, subName: mySub.substitute_name }); setSubThankYouMessage(''); }}>
+                                          <i className="fas fa-heart"></i> Say Thank You to {mySub.substitute_name?.split(' ')[0]}
+                                        </button>
+                                      )}
+                                      {mySub && mySub.thank_you_sent && (
+                                        <span className="lu-sub-thankyou-sent"><i className="fas fa-check-circle"></i> Thank you sent!</span>
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                                {/* Show sub dates where I'm the substitute */}
+                                {getAcceptedSubsAsSubstitute().map(sub => {
+                                  const dateStr = sub.schedule_date;
+                                  const isPast = new Date(dateStr + 'T00:00:00') < new Date(new Date().toDateString());
+                                  return (
+                                    <div key={`sub-${sub.id}`} className={`lu-info-date-item sub-date${isPast ? ' past' : ''}`} onClick={() => { if (!isPast) handleLineupDateSelect(dateStr); }}>
+                                      <div className="lu-info-date-left sub">
+                                        <span className="lu-info-date-day">{new Date(dateStr + 'T00:00:00').getDate()}</span>
+                                        <span className="lu-info-date-month">{new Date(dateStr + 'T00:00:00').toLocaleDateString('en-US', { month: 'short' })}</span>
+                                      </div>
+                                      <div className="lu-info-date-right">
+                                        <span className="lu-info-date-full">{formatDate(dateStr)}</span>
+                                        <span className="lu-sub-status substituting"><i className="fas fa-hand-holding-heart"></i> Subbing for {sub.requester_name}</span>
+                                        {!isPast && <span className="lu-info-songs-missing"><i className="fas fa-music"></i> Tap to add songs</span>}
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Card: Open Sub Requests (from other Song Leaders) */}
+                        {getOpenSubsForMe().length > 0 && (
+                          <div className="lu-info-card">
+                            <div className="lu-info-card-header purple">
+                              <i className="fas fa-people-arrows"></i>
+                              <span>Open Sub Requests</span>
+                              <span className="lu-sub-badge">{getOpenSubsForMe().length}</span>
+                            </div>
+                            <div className="lu-info-card-body">
+                              <p className="lu-info-hint">A fellow Song Leader needs a substitute. Can you help?</p>
+                              <div className="lu-sub-requests-list">
+                                {getOpenSubsForMe().map(sub => (
+                                  <div key={sub.id} className="lu-sub-request-card">
+                                    <div className="lu-sub-request-profile">
+                                      <div className="lu-sub-request-avatar">
+                                        {sub.requester_profile_picture ? <img src={sub.requester_profile_picture} alt="" referrerPolicy="no-referrer" /> : <span>{getInitials(sub.requester_name)}</span>}
+                                      </div>
+                                      <div className="lu-sub-request-info">
+                                        <strong>{sub.requester_name}</strong>
+                                        <span className="lu-sub-request-date"><i className="fas fa-calendar-day"></i> {formatDate(sub.schedule_date)}</span>
+                                      </div>
+                                    </div>
+                                    <p className="lu-sub-request-reason"><i className="fas fa-quote-left"></i> {sub.reason}</p>
+                                    <div className="lu-sub-request-actions">
+                                      <button className="lu-sub-accept-btn" onClick={() => acceptSubRequest(sub.id)}>
+                                        <i className="fas fa-check"></i> I&apos;ll Sub!
+                                      </button>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Card 2: Pending Songs Alert */}
+                        {getAssignedDatesMissingSongs().length > 0 && (
+                          <div className="lu-info-card alert">
+                            <div className="lu-info-card-header red">
+                              <i className="fas fa-exclamation-circle"></i>
+                              <span>Songs Needed!</span>
+                            </div>
+                            <div className="lu-info-card-body">
+                              <p className="lu-info-alert-text">You have <strong>{getAssignedDatesMissingSongs().length}</strong> upcoming {getAssignedDatesMissingSongs().length === 1 ? 'date' : 'dates'} without songs. Please add your song lineup.</p>
+                              {getAssignedDatesMissingSongs().map(sch => (
+                                <div key={sch.scheduleDate} className="lu-info-alert-item" onClick={() => handleLineupDateSelect(sch.scheduleDate)}>
+                                  <i className="fas fa-arrow-right"></i> <strong>{formatDate(sch.scheduleDate)}</strong> — Tap to add songs
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Card 3: My Excuses */}
+                        <div className="lu-info-card">
+                          <div className="lu-info-card-header blue">
+                            <i className="fas fa-calendar-minus"></i>
+                            <span>My Excuse Dates</span>
+                          </div>
+                          <div className="lu-info-card-body">
+                            <p className="lu-info-hint">Click an available (non-assigned) future date on the calendar to file an excuse.</p>
+                            {getMyExcuses().length === 0 ? (
+                              <p className="lu-info-empty"><i className="fas fa-check-circle"></i> No excuses filed.</p>
+                            ) : (
+                              <div className="lu-excuse-list">
+                                {getMyExcuses().map(exc => {
+                                  const isPast = new Date(exc.excuse_date + 'T00:00:00') < new Date(new Date().toDateString());
+                                  return (
+                                    <div key={exc.id} className={`lu-excuse-item ${exc.status.toLowerCase()}${isPast ? ' past' : ''}`}>
+                                      <div className="lu-excuse-item-top">
+                                        <span className="lu-excuse-date">{formatDate(exc.excuse_date)}</span>
+                                        <span className={`lu-excuse-status ${exc.status.toLowerCase()}`}>{exc.status}</span>
+                                      </div>
+                                      <p className="lu-excuse-reason"><i className="fas fa-quote-left"></i> {exc.reason}</p>
+                                      {exc.admin_note && <p className="lu-excuse-admin-note"><i className="fas fa-comment-dots"></i> Admin: {exc.admin_note}</p>}
+                                      {exc.status === 'Pending' && !isPast && (
+                                        <button className="lu-excuse-cancel-btn" onClick={() => cancelExcuse(exc.id)}><i className="fas fa-times"></i> Cancel</button>
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Excuse Modal */}
+                      {excuseModalDate && (
+                        <div className="um-modal-overlay" onClick={() => setExcuseModalDate(null)}>
+                          <div className="lu-excuse-modal" onClick={(e) => e.stopPropagation()}>
+                            <div className="lu-excuse-modal-header">
+                              <h3><i className="fas fa-calendar-minus"></i> File an Excuse</h3>
+                              <button className="btn-close-modal" onClick={() => setExcuseModalDate(null)}><i className="fas fa-times"></i></button>
+                            </div>
+                            <div className="lu-excuse-modal-body">
+                              <div className="lu-excuse-date-display">
+                                <i className="fas fa-calendar-day"></i>
+                                <span>{formatDate(excuseModalDate)}</span>
+                              </div>
+                              {getMyExcuseForDate(excuseModalDate) ? (
+                                <div className="lu-excuse-already">
+                                  <i className="fas fa-info-circle"></i>
+                                  <p>You already have an excuse for this date ({getMyExcuseForDate(excuseModalDate).status}).</p>
+                                </div>
+                              ) : (
+                                <>
+                                  <label className="lu-excuse-label">Reason for excuse <span>*</span></label>
+                                  <textarea className="form-control lu-excuse-textarea" rows={3} value={excuseReason} onChange={(e) => setExcuseReason(e.target.value)} placeholder="e.g., Family event, out of town, medical appointment..." />
+                                  <p className="lu-excuse-note"><i className="fas fa-info-circle"></i> Your excuse will be marked as <strong>Pending</strong> until the Admin reviews and approves it.</p>
+                                </>
+                              )}
+                            </div>
+                            {!getMyExcuseForDate(excuseModalDate) && (
+                              <div className="lu-excuse-modal-footer">
+                                <button className="btn-secondary" onClick={() => setExcuseModalDate(null)}>Cancel</button>
+                                <button className="btn-primary" onClick={() => submitExcuse()} disabled={excuseLoading || !excuseReason.trim()}>
+                                  {excuseLoading ? <><div className="spinner" style={{ display: 'inline-block', width: 16, height: 16, marginRight: 6 }}></div> Submitting...</> : <><i className="fas fa-paper-plane"></i> Submit Excuse</>}
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Substitute Request Modal */}
+                      {subModalDate && (
+                        <div className="um-modal-overlay" onClick={() => setSubModalDate(null)}>
+                          <div className="lu-excuse-modal lu-sub-modal" onClick={(e) => e.stopPropagation()}>
+                            <div className="lu-excuse-modal-header lu-sub-modal-header">
+                              <h3><i className="fas fa-people-arrows"></i> Request Substitute</h3>
+                              <button className="btn-close-modal" onClick={() => setSubModalDate(null)}><i className="fas fa-times"></i></button>
+                            </div>
+                            <div className="lu-excuse-modal-body">
+                              <div className="lu-excuse-date-display">
+                                <i className="fas fa-calendar-day"></i>
+                                <span>{formatDate(subModalDate)}</span>
+                              </div>
+                              <p className="lu-sub-modal-desc">
+                                <i className="fas fa-info-circle"></i> Your request will go to the Admin for approval. Once approved, all Song Leaders will be notified and can volunteer to substitute for you.
+                              </p>
+                              <label className="lu-excuse-label">Reason for substitute request <span>*</span></label>
+                              <textarea className="form-control lu-excuse-textarea" rows={3} value={subReason} onChange={(e) => setSubReason(e.target.value)} placeholder="e.g., I'll be out of town, family commitment, not feeling well..." />
+                            </div>
+                            <div className="lu-excuse-modal-footer">
+                              <button className="btn-secondary" onClick={() => setSubModalDate(null)}>Cancel</button>
+                              <button className="btn-primary lu-sub-submit-btn" onClick={submitSubRequest} disabled={subLoading || !subReason.trim()}>
+                                {subLoading ? <><div className="spinner" style={{ display: 'inline-block', width: 16, height: 16, marginRight: 6 }}></div> Submitting...</> : <><i className="fas fa-paper-plane"></i> Submit Request</>}
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Thank You Modal */}
+                      {subThankYouModal && (
+                        <div className="um-modal-overlay" onClick={() => setSubThankYouModal(null)}>
+                          <div className="lu-excuse-modal lu-thankyou-modal" onClick={(e) => e.stopPropagation()}>
+                            <div className="lu-excuse-modal-header lu-thankyou-modal-header">
+                              <h3><i className="fas fa-heart"></i> Send Thank You</h3>
+                              <button className="btn-close-modal" onClick={() => setSubThankYouModal(null)}><i className="fas fa-times"></i></button>
+                            </div>
+                            <div className="lu-excuse-modal-body">
+                              <div className="lu-thankyou-to">
+                                <i className="fas fa-user"></i>
+                                <span>To: <strong>{subThankYouModal.subName}</strong></span>
+                              </div>
+                              <label className="lu-excuse-label">Your message (optional)</label>
+                              <textarea className="form-control lu-excuse-textarea" rows={3} value={subThankYouMessage} onChange={(e) => setSubThankYouMessage(e.target.value)} placeholder="Thank you for substituting! God bless you! 🙏" />
+                            </div>
+                            <div className="lu-excuse-modal-footer">
+                              <button className="btn-secondary" onClick={() => setSubThankYouModal(null)}>Cancel</button>
+                              <button className="btn-primary lu-thankyou-send-btn" onClick={sendSubThankYou}>
+                                <i className="fas fa-heart"></i> Send Thank You 💛
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Detail Popup for viewing other leader's date */}
+                      {lineupDetailPopup && (
+                        <div className="lineup-detail-overlay" onClick={() => setLineupDetailPopup(null)}>
+                          <div className={`lineup-detail-modal${lineupDetailPopup.substitutedBy ? ' sub-detail' : ''}`} onClick={(e) => e.stopPropagation()}>
+                            <button className="lineup-detail-close" onClick={() => setLineupDetailPopup(null)}><i className="fas fa-times"></i></button>
+                            <div className="lineup-detail-modal-header">
+                              <i className="fas fa-calendar-day"></i>
+                              <h3>{formatDate(lineupDetailPopup.date)}</h3>
+                            </div>
+                            <div className="lineup-detail-modal-body">
+                              {lineupDetailPopup.substitutedBy && (
+                                <div className="lu-detail-sub-banner">
+                                  <i className="fas fa-people-arrows"></i>
+                                  <span>Substituted by <strong>{lineupDetailPopup.substitutedBy}</strong></span>
+                                </div>
+                              )}
+                              <div className="lineup-detail-row"><i className="fas fa-microphone" style={{ color: 'var(--primary)' }}></i><div><span className="lineup-detail-label">Song Leader</span><span className="lineup-detail-value">{lineupDetailPopup.songLeader} {lineupDetailPopup.substitutedBy ? '(Substitute)' : ''}</span></div></div>
+                              <div className="lineup-detail-row"><i className="fas fa-users" style={{ color: 'var(--secondary)' }}></i><div><span className="lineup-detail-label">Backup Singers</span><span className="lineup-detail-value">{lineupDetailPopup.backupSingers.length > 0 ? lineupDetailPopup.backupSingers.join(', ') : 'None assigned'}</span></div></div>
+                              {(lineupDetailPopup.slowSongs.length > 0 || lineupDetailPopup.fastSongs.length > 0) && (
+                                <div className="lineup-detail-songs">
+                                  <span className="lineup-detail-label" style={{ marginBottom: 8, display: 'block' }}>Songs</span>
+                                  {lineupDetailPopup.slowSongs.map((s, si) => <div key={`s-${si}`} className="lineup-detail-song-pill slow"><i className="fas fa-music"></i> {s.title}</div>)}
+                                  {lineupDetailPopup.fastSongs.map((s, si) => <div key={`f-${si}`} className="lineup-detail-song-pill fast"><i className="fas fa-bolt"></i> {s.title}</div>)}
+                                </div>
+                              )}
+                              {lineupDetailPopup.substitutedBy && (
+                                <div className="lu-detail-sub-note">
+                                  <i className="fas fa-lock"></i>
+                                  <span>You can no longer edit songs for this date. The substitute Song Leader is now in charge of the lineup.</span>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* SONG LEADER FORM VIEW (non-admin) */}
+                  {lineupView === 'form' && !isAdmin && (
+                    <div className="lineup-form-modern">
+                      {isSubstituteDateForMe(lineupForm.scheduleDate) && (() => {
+                        const sched = scheduleData.find(s => s.scheduleDate === lineupForm.scheduleDate);
+                        return sched?.hasSubstitute && sched?.originalSongLeader ? (
+                          <div className="lu-sub-banner">
+                            <i className="fas fa-hand-holding-heart"></i>
+                            <span>You&apos;re substituting for <strong>{sched.originalSongLeader}</strong> on this date</span>
+                          </div>
+                        ) : null;
+                      })()}
+                      <div className="lineup-date-banner">
+                        <div className="lineup-date-banner-left"><i className="fas fa-calendar-check"></i><div><span className="lineup-date-label">Schedule Date</span><span className="lineup-date-value">{formatDate(lineupForm.scheduleDate)}</span></div></div>
+                        <button className="btn-change-date" onClick={() => { resetLineupForm(); }}><i className="fas fa-arrow-left"></i> Back</button>
+                      </div>
+
                       <div className="lineup-assignment-info">
                         <div className="lineup-assignment-row">
-                          <div className="lineup-assignment-item">
-                            <i className="fas fa-microphone" style={{ color: 'var(--primary)' }}></i>
-                            <div>
-                              <span className="lineup-assignment-label">Song Leader</span>
-                              <span className="lineup-assignment-value">{lineupForm.songLeader}</span>
-                            </div>
-                          </div>
-                          <div className="lineup-assignment-item">
-                            <i className="fas fa-users" style={{ color: 'var(--secondary)' }}></i>
-                            <div>
-                              <span className="lineup-assignment-label">Backupers</span>
-                              <span className="lineup-assignment-value">{lineupForm.backupSingers.filter(s => s).length > 0 ? lineupForm.backupSingers.filter(s => s).join(', ') : 'None assigned'}</span>
-                            </div>
-                          </div>
+                          <div className="lineup-assignment-item"><i className="fas fa-microphone" style={{ color: 'var(--primary)' }}></i><div><span className="lineup-assignment-label">Song Leader</span><span className="lineup-assignment-value">{lineupForm.songLeader}</span></div></div>
+                          <div className="lineup-assignment-item"><i className="fas fa-users" style={{ color: 'var(--secondary)' }}></i><div><span className="lineup-assignment-label">Backup Singers</span><span className="lineup-assignment-value">{lineupForm.backupSingers.filter(s => s).length > 0 ? lineupForm.backupSingers.filter(s => s).join(', ') : 'None assigned'}</span></div></div>
                         </div>
                       </div>
 
-                      {/* Practice Date */}
                       <div className="lineup-details-row">
-                        <div className="lineup-detail-card" style={{ flex: '1 1 100%' }}>
-                          <label><i className="fas fa-calendar-alt"></i> Practice Date</label>
-                          <input type="date" className="form-control" value={lineupForm.practiceDate} onChange={(e) => handleLineupChange('practiceDate', e.target.value)} />
-                        </div>
+                        <div className="lineup-detail-card" style={{ flex: '1 1 100%' }}><label><i className="fas fa-calendar-alt"></i> Practice Date</label><input type="date" className="form-control" value={lineupForm.practiceDate} onChange={(e) => handleLineupChange('practiceDate', e.target.value)} /></div>
                       </div>
 
-                      {/* Two-Column Songs: Slow & Fast side by side */}
                       <div className="lineup-songs-grid">
                         {['slowSongs', 'fastSongs'].map((type) => (
                           <div key={type} className="lineup-song-column">
@@ -3584,25 +6087,16 @@ Respond ONLY with a valid JSON object (no markdown, no code fences, no extra tex
                                       {lineupForm[type].length > 1 && <button className="btn-remove-sm" onClick={() => removeSong(type, i)}><i className="fas fa-trash-alt"></i></button>}
                                     </div>
                                   </div>
-
-                                  {/* AI Scan Result Badge */}
                                   {scan && (
                                     <div className={`song-scan-badge scan-${scan.status}`}>
-                                      <div className="song-scan-icon">
-                                        {scan.status === 'scanning' && <div className="scan-spinner"></div>}
-                                        {scan.status === 'safe' && <i className="fas fa-check-circle"></i>}
-                                        {scan.status === 'explicit' && <i className="fas fa-exclamation-triangle"></i>}
-                                        {scan.status === 'warning' && <i className="fas fa-exclamation-circle"></i>}
-                                        {scan.status === 'error' && <i className="fas fa-question-circle"></i>}
-                                      </div>
-                                      <div className="song-scan-text">
-                                        <span className="song-scan-label">{scan.message}</span>
-                                        {scan.details && <span className="song-scan-details">{scan.details}</span>}
-                                      </div>
+                                      <div className="song-scan-icon">{scan.status === 'scanning' && <div className="scan-spinner"></div>}{scan.status === 'safe' && <i className="fas fa-check-circle"></i>}{scan.status === 'explicit' && <i className="fas fa-exclamation-triangle"></i>}{scan.status === 'warning' && <i className="fas fa-exclamation-circle"></i>}{scan.status === 'error' && <i className="fas fa-question-circle"></i>}</div>
+                                      <div className="song-scan-text"><span className="song-scan-label">{scan.message}</span>{scan.details && <span className="song-scan-details">{scan.details}</span>}</div>
                                     </div>
                                   )}
-
-                                  <input className="form-control" placeholder="Song title *" value={song.title} onChange={(e) => handleSongChange(type, i, 'title', e.target.value)} />
+                                  <div className="song-title-input-wrap">
+                                    <input className="form-control" placeholder={songAutoFillLoading[`${type}-${i}`] ? 'Detecting song title...' : 'Song title *'} value={song.title} onChange={(e) => handleSongChange(type, i, 'title', e.target.value)} disabled={!!songAutoFillLoading[`${type}-${i}`]} />
+                                    {songAutoFillLoading[`${type}-${i}`] && <div className="song-title-autofill-spinner"><div className="scan-spinner"></div></div>}
+                                  </div>
                                   <input className="form-control" placeholder="YouTube link (optional)" value={song.link} onChange={(e) => handleSongChange(type, i, 'link', e.target.value)} />
                                   {song.link && extractYouTubeId(song.link) && <div className="youtube-preview"><iframe src={`https://www.youtube.com/embed/${extractYouTubeId(song.link)}`} allowFullScreen title={song.title}></iframe></div>}
                                   <textarea className="form-control" placeholder="Lyrics (optional)" rows={2} value={song.lyrics} onChange={(e) => handleSongChange(type, i, 'lyrics', e.target.value)}></textarea>
@@ -3616,89 +6110,620 @@ Respond ONLY with a valid JSON object (no markdown, no code fences, no extra tex
                         ))}
                       </div>
 
-                      {/* Submit (Song Leader) */}
                       <div className="lineup-submit-row">
                         <button className="btn-secondary" onClick={resetLineupForm}><i className="fas fa-arrow-left"></i> Cancel</button>
                         <button className="btn-primary btn-submit-lineup" onClick={submitLineup} disabled={lineupLoading}>
                           {lineupLoading ? <><div className="spinner" style={{ display: 'inline-block', width: 18, height: 18, marginRight: 8 }}></div> Saving...</> : <><i className="fas fa-paper-plane"></i> {editingLineup ? 'Update Songs' : 'Submit Songs'}</>}
                         </button>
                       </div>
-                    </>
+                    </div>
+                  )}
+                </>
+              )}
+
+              {/* ===== ALL ASSIGNMENTS TAB ===== */}
+              {lineupTab === 'all' && (
+                <div className="lu-all-container">
+                  {/* View Detail Modal */}
+                  {lineupViewingAssignment && (
+                    <div className="um-modal-overlay" onClick={() => setLineupViewingAssignment(null)}>
+                      <div className="lu-view-modal" onClick={(e) => e.stopPropagation()}>
+                        <div className="lu-view-modal-header">
+                          <h3><i className="fas fa-calendar-day"></i> {formatDate(lineupViewingAssignment.scheduleDate)}</h3>
+                          <button className="btn-close-modal" onClick={() => setLineupViewingAssignment(null)}><i className="fas fa-times"></i></button>
+                        </div>
+                        <div className="lu-view-modal-body">
+                          <div className="lu-view-row"><span className="lu-view-label"><i className="fas fa-microphone"></i> {lineupViewingAssignment.hasSubstitute ? 'Song Leader (Substitute)' : 'Song Leader'}</span><span className="lu-view-value">{lineupViewingAssignment.songLeader}</span></div>
+                          {lineupViewingAssignment.hasSubstitute && lineupViewingAssignment.originalSongLeader && <div className="lu-view-row"><span className="lu-view-label"><i className="fas fa-user-tag"></i> Song Leader</span><span className="lu-view-value paw-grayed-out">{lineupViewingAssignment.originalSongLeader}</span></div>}
+                          <div className="lu-view-row"><span className="lu-view-label"><i className="fas fa-users"></i> Backup Singers</span><span className="lu-view-value">{lineupViewingAssignment.backupSingers?.length > 0 ? lineupViewingAssignment.backupSingers.join(', ') : 'None'}</span></div>
+                          {lineupViewingAssignment.practiceDate && <div className="lu-view-row"><span className="lu-view-label"><i className="fas fa-calendar-alt"></i> Practice Date</span><span className="lu-view-value">{formatDate(lineupViewingAssignment.practiceDate)}</span></div>}
+                          {((lineupViewingAssignment.slowSongs?.length > 0 && lineupViewingAssignment.slowSongs.some(s => s.title)) || (lineupViewingAssignment.fastSongs?.length > 0 && lineupViewingAssignment.fastSongs.some(s => s.title))) && (
+                            <div className="lu-view-songs">
+                              <span className="lu-view-label" style={{ marginBottom: 8, display: 'block' }}><i className="fas fa-music"></i> Songs</span>
+                              <div className="lu-view-songs-grid">
+                                {lineupViewingAssignment.slowSongs?.filter(s => s.title).map((s, i) => (
+                                  <div key={`s-${i}`} className="lu-view-song-pill slow">
+                                    <i className="fas fa-music"></i> {s.title}
+                                    {s.link && extractYouTubeId(s.link) && <a href={s.link} target="_blank" rel="noopener noreferrer" className="lu-yt-link"><i className="fab fa-youtube"></i></a>}
+                                  </div>
+                                ))}
+                                {lineupViewingAssignment.fastSongs?.filter(s => s.title).map((s, i) => (
+                                  <div key={`f-${i}`} className="lu-view-song-pill fast">
+                                    <i className="fas fa-bolt"></i> {s.title}
+                                    {s.link && extractYouTubeId(s.link) && <a href={s.link} target="_blank" rel="noopener noreferrer" className="lu-yt-link"><i className="fab fa-youtube"></i></a>}
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                          {isAdmin && lineupViewingAssignment.submittedBy && (
+                            <div className="lu-view-row"><span className="lu-view-label"><i className="fas fa-user-edit"></i> Created by</span><span className="lu-view-value">{lineupViewingAssignment.submittedBy}</span></div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {getMyLineups().length === 0 ? (
+                    <div className="lineup-empty-state">
+                      <i className="fas fa-music"></i>
+                      <h3>{isAdmin ? 'No Assignments Yet' : 'No Lineups Yet'}</h3>
+                      <p>{isAdmin ? 'No Song Leaders have been assigned yet.' : 'You have no assigned dates yet.'}</p>
+                      <button className="btn-primary" onClick={() => { resetLineupForm(); setLineupTab('assign'); }} style={{ marginTop: 15, padding: '12px 25px' }}><i className="fas fa-plus"></i> {isAdmin ? 'Assign Lineup' : 'Back to Calendar'}</button>
+                    </div>
+                  ) : (
+                    <div className="lu-assignments-list">
+                      {getMyLineups().map((lineup) => {
+                        const hasSongs = (lineup.slowSongs?.length > 0 && lineup.slowSongs.some(s => s.title)) || (lineup.fastSongs?.length > 0 && lineup.fastSongs.some(s => s.title));
+                        const isPast = new Date(lineup.scheduleDate + 'T00:00:00') < new Date(new Date().toDateString());
+                        return (
+                          <div key={lineup.scheduleId} className={`lu-assignment-card${isPast ? ' past' : ''}${lineup.hasSubstitute ? ' has-sub' : ''}`}>
+                            <div className="lu-assignment-date-col">
+                              <span className="lu-assignment-month">{new Date(lineup.scheduleDate).toLocaleDateString('en-US', { month: 'short' })}</span>
+                              <span className="lu-assignment-day">{new Date(lineup.scheduleDate).getDate()}</span>
+                              <span className="lu-assignment-year">{new Date(lineup.scheduleDate).getFullYear()}</span>
+                            </div>
+                            <div className="lu-assignment-info">
+                              <div className="lu-assignment-leader"><i className="fas fa-microphone"></i> {lineup.hasSubstitute ? 'Song Leader (Substitute): ' : ''}{lineup.songLeader}</div>
+                              {lineup.hasSubstitute && lineup.originalSongLeader && <div className="lu-assignment-sub-info"><i className="fas fa-user"></i> Song Leader: <strong className="paw-grayed-out">{lineup.originalSongLeader}</strong></div>}
+                              {lineup.backupSingers?.length > 0 && <div className="lu-assignment-backups"><i className="fas fa-users"></i> {lineup.backupSingers.join(', ')}</div>}
+                              {hasSongs && <div className="lu-assignment-songs-count"><i className="fas fa-music"></i> {(lineup.slowSongs?.filter(s => s.title).length || 0) + (lineup.fastSongs?.filter(s => s.title).length || 0)} songs</div>}
+                              {!isAdmin && !hasSongs && !isPast && <div className="lu-assignment-no-songs"><i className="fas fa-exclamation-circle"></i> Songs not yet added</div>}
+                            </div>
+                            <div className="lu-assignment-actions">
+                              <button className="lu-action-btn lu-action-view" onClick={() => setLineupViewingAssignment(lineup)} title="View"><i className="fas fa-eye"></i></button>
+                              {!isPast && (
+                                <button className="lu-action-btn lu-action-edit" onClick={() => startEditLineup(lineup)} title="Edit"><i className="fas fa-edit"></i></button>
+                              )}
+                              {isAdmin && (
+                                deleteConfirmId === lineup.scheduleId ? (
+                                  <div className="lu-delete-confirm">
+                                    <button className="lu-action-btn lu-action-confirm-yes" onClick={() => deleteLineup(lineup.scheduleId)}><i className="fas fa-check"></i></button>
+                                    <button className="lu-action-btn lu-action-confirm-no" onClick={() => setDeleteConfirmId(null)}><i className="fas fa-times"></i></button>
+                                  </div>
+                                ) : (
+                                  <button className="lu-action-btn lu-action-delete" onClick={() => setDeleteConfirmId(lineup.scheduleId)} title="Delete"><i className="fas fa-trash-alt"></i></button>
+                                )
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
                   )}
                 </div>
               )}
-            </section>
-          )}
 
-          {/* ========== MY LINEUPS / ALL ASSIGNMENTS ========== */}
-          {canManage(MODULES.CREATE_SONG_LIST) && (
-            <section className={`content-section ${activeSection === 'my-lineups' ? 'active' : ''}`}>
-              <h2 className="section-title">{isAdmin ? 'All Assignments' : 'My Lineups'}</h2>
-              {getMyLineups().length === 0 ? (
-                <div className="lineup-empty-state">
-                  <i className="fas fa-music"></i>
-                  <h3>{isAdmin ? 'No Assignments Yet' : 'No Lineups Yet'}</h3>
-                  <p>{isAdmin ? 'No Song Leaders have been assigned yet. Start by creating an assignment!' : 'You have no assigned dates yet. Your Admin will assign you.'}</p>
-                  {isAdmin && <button className="btn-primary" onClick={() => { resetLineupForm(); setActiveSection('create-lineup'); }} style={{ marginTop: 15, padding: '12px 25px' }}><i className="fas fa-plus"></i> Assign Lineup</button>}
-                </div>
-              ) : (
-                <div className="my-lineups-grid">
-                  {getMyLineups().map((lineup) => {
-                    const hasSongs = (lineup.slowSongs?.length > 0 && lineup.slowSongs.some(s => s.title)) || (lineup.fastSongs?.length > 0 && lineup.fastSongs.some(s => s.title));
-                    return (
-                    <div key={lineup.scheduleId} className="my-lineup-card">
-                      <div className="my-lineup-card-header">
-                        <div className="my-lineup-date-badge">
-                          <span className="mlc-month">{new Date(lineup.scheduleDate).toLocaleDateString('en-US', { month: 'short' })}</span>
-                          <span className="mlc-day">{new Date(lineup.scheduleDate).getDate()}</span>
-                          <span className="mlc-year">{new Date(lineup.scheduleDate).getFullYear()}</span>
+              {/* ===== PAW LOGS TAB (Admin) / EXCUSE HISTORY (Song Leader) ===== */}
+              {lineupTab === 'paw-logs' && (
+                <div className="paw-logs-container">
+
+                  {/* ---- ADMIN: Full PAW Logs ---- */}
+                  {isAdmin && (
+                    <>
+                      {/* Stats Row */}
+                      <div className="paw-stats-row">
+                        <div className="paw-stat-card pending">
+                          <div className="paw-stat-icon"><i className="fas fa-clock"></i></div>
+                          <div className="paw-stat-info">
+                            <span className="paw-stat-num">{getPawExcuseStats().pending}</span>
+                            <span className="paw-stat-label">Pending</span>
+                          </div>
                         </div>
-                        <div className="my-lineup-info">
-                          <h4>{formatDate(lineup.scheduleDate)}</h4>
-                          <p><i className="fas fa-microphone"></i> {lineup.songLeader}</p>
-                          {lineup.backupSingers?.length > 0 && <p className="backup-text"><i className="fas fa-users"></i> {lineup.backupSingers.join(', ')}</p>}
-                          {lineup.practiceDate && <p className="practice-text"><i className="fas fa-calendar-alt"></i> Practice: {formatDate(lineup.practiceDate)}</p>}
-                          {isAdmin && lineup.submittedBy && (
-                            <p className="submitted-by-text"><i className="fas fa-user-edit"></i> Created by: {lineup.submittedBy}</p>
-                          )}
-                          {!isAdmin && !hasSongs && (
-                            <p style={{ color: 'var(--accent)', fontSize: '0.8rem', marginTop: 4 }}><i className="fas fa-exclamation-circle"></i> Songs not yet added</p>
-                          )}
+                        <div className="paw-stat-card approved">
+                          <div className="paw-stat-icon"><i className="fas fa-check-circle"></i></div>
+                          <div className="paw-stat-info">
+                            <span className="paw-stat-num">{getPawExcuseStats().approved}</span>
+                            <span className="paw-stat-label">Approved</span>
+                          </div>
+                        </div>
+                        <div className="paw-stat-card rejected">
+                          <div className="paw-stat-icon"><i className="fas fa-times-circle"></i></div>
+                          <div className="paw-stat-info">
+                            <span className="paw-stat-num">{getPawExcuseStats().rejected}</span>
+                            <span className="paw-stat-label">Rejected</span>
+                          </div>
+                        </div>
+                        <div className="paw-stat-card total">
+                          <div className="paw-stat-icon"><i className="fas fa-clipboard-list"></i></div>
+                          <div className="paw-stat-info">
+                            <span className="paw-stat-num">{getPawExcuseStats().total}</span>
+                            <span className="paw-stat-label">Total</span>
+                          </div>
                         </div>
                       </div>
-                      {hasSongs && (
-                        <div className="my-lineup-songs-row">
-                          <div className="my-lineup-song-group slow">
-                            <span className="song-group-label"><i className="fas fa-music"></i> Slow</span>
-                            {lineup.slowSongs?.length > 0 && lineup.slowSongs.some(s => s.title) ? lineup.slowSongs.filter(s => s.title).map((s, i) => <span key={i} className="song-pill">{s.title}</span>) : <span className="no-songs">None</span>}
+
+                      {/* Admin Pending Notifications */}
+                      {getPendingExcuses().length > 0 && (
+                        <div className="paw-notif-section">
+                          <div className="paw-notif-header">
+                            <i className="fas fa-bell"></i>
+                            <span>Pending Excuse Requests</span>
+                            <span className="paw-notif-badge">{getPendingExcuses().length}</span>
                           </div>
-                          <div className="my-lineup-song-group fast">
-                            <span className="song-group-label"><i className="fas fa-bolt"></i> Fast</span>
-                            {lineup.fastSongs?.length > 0 && lineup.fastSongs.some(s => s.title) ? lineup.fastSongs.filter(s => s.title).map((s, i) => <span key={i} className="song-pill">{s.title}</span>) : <span className="no-songs">None</span>}
+                          <div className="paw-notif-list">
+                            {getPendingExcuses().map(exc => {
+                              const pic = getExcuseProfilePic(exc);
+                              const roleColor = PAW_ROLE_COLORS[exc.role_type || 'Song Leader'] || '#926c15';
+                              return (
+                                <div key={exc.id} className="paw-notif-card">
+                                  <div className="paw-notif-avatar" style={{ borderColor: roleColor }}>
+                                    {pic ? <img src={pic} alt="" referrerPolicy="no-referrer" /> : <span>{getInitials(exc.user_name)}</span>}
+                                  </div>
+                                  <div className="paw-notif-body">
+                                    <div className="paw-notif-top">
+                                      <strong>{exc.user_name}</strong>
+                                      <span className="paw-notif-role" style={{ background: `${roleColor}18`, color: roleColor }}><i className={`fas ${PAW_ROLE_ICONS[exc.role_type || 'Song Leader']}`}></i> {exc.role_type || 'Song Leader'}</span>
+                                    </div>
+                                    <div className="paw-notif-date"><i className="fas fa-calendar-day"></i> {formatDate(exc.excuse_date)}</div>
+                                    <p className="paw-notif-reason"><i className="fas fa-quote-left"></i> {exc.reason}</p>
+                                    <div className="paw-notif-time"><i className="fas fa-clock"></i> Filed {new Date(exc.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</div>
+                                  </div>
+                                  <div className="paw-notif-actions">
+                                    <button className="paw-action-approve" onClick={() => reviewExcuse(exc.id, 'Approved')} title="Approve"><i className="fas fa-check"></i></button>
+                                    <button className="paw-action-reject" onClick={() => reviewExcuse(exc.id, 'Rejected')} title="Reject"><i className="fas fa-times"></i></button>
+                                  </div>
+                                </div>
+                              );
+                            })}
                           </div>
                         </div>
                       )}
-                      <div className="my-lineup-actions">
-                        {isAdmin ? (
-                          <>
-                            <button className="btn-edit-lineup" onClick={() => startEditLineup(lineup)}><i className="fas fa-edit"></i> Edit Assignment</button>
-                            {deleteConfirmId === lineup.scheduleId ? (
-                              <div className="delete-confirm-inline">
-                                <span>Delete?</span>
-                                <button className="btn-confirm-yes" onClick={() => deleteLineup(lineup.scheduleId)}><i className="fas fa-check"></i> Yes</button>
-                                <button className="btn-confirm-no" onClick={() => setDeleteConfirmId(null)}><i className="fas fa-times"></i> No</button>
+
+                      {/* Admin Pending Sub Requests in PAW Logs */}
+                      {getPendingAdminSubs().length > 0 && (
+                        <div className="paw-notif-section paw-sub-notif-section">
+                          <div className="paw-notif-header" style={{ borderLeftColor: '#9c27b0' }}>
+                            <i className="fas fa-people-arrows" style={{ color: '#9c27b0' }}></i>
+                            <span>Pending Substitute Requests</span>
+                            <span className="paw-notif-badge" style={{ background: '#9c27b0' }}>{getPendingAdminSubs().length}</span>
+                          </div>
+                          <div className="paw-notif-list">
+                            {getPendingAdminSubs().map(sub => (
+                              <div key={sub.id} className="paw-notif-card">
+                                <div className="paw-notif-avatar" style={{ borderColor: '#9c27b0' }}>
+                                  {sub.requester_profile_picture ? <img src={sub.requester_profile_picture} alt="" referrerPolicy="no-referrer" /> : <span>{getInitials(sub.requester_name)}</span>}
+                                </div>
+                                <div className="paw-notif-body">
+                                  <div className="paw-notif-top">
+                                    <strong>{sub.requester_name}</strong>
+                                    <span className="paw-notif-role" style={{ background: 'rgba(156,39,176,0.1)', color: '#9c27b0' }}><i className="fas fa-people-arrows"></i> Sub Request</span>
+                                  </div>
+                                  <div className="paw-notif-date"><i className="fas fa-calendar-day"></i> {formatDate(sub.schedule_date)}</div>
+                                  <p className="paw-notif-reason"><i className="fas fa-quote-left"></i> {sub.reason}</p>
+                                  <div className="paw-notif-time"><i className="fas fa-clock"></i> Filed {new Date(sub.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</div>
+                                </div>
+                                <div className="paw-notif-actions">
+                                  <button className="paw-action-approve" onClick={() => adminReviewSub(sub.id, 'approve')} title="Approve & Notify All Song Leaders"><i className="fas fa-check"></i></button>
+                                  <button className="paw-action-reject" onClick={() => adminReviewSub(sub.id, 'reject')} title="Reject"><i className="fas fa-times"></i></button>
+                                </div>
                               </div>
-                            ) : (
-                              <button className="btn-delete-lineup" onClick={() => setDeleteConfirmId(lineup.scheduleId)}><i className="fas fa-trash-alt"></i> Delete</button>
-                            )}
-                          </>
-                        ) : (
-                          <button className="btn-edit-lineup" onClick={() => startEditLineup(lineup)}><i className="fas fa-edit"></i> {hasSongs ? 'Edit Songs' : 'Add Songs'}</button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Sub-Tab Toggle: Excuses vs Substitutes */}
+                      <div className="paw-sub-tab-bar">
+                        <button className={`paw-sub-tab ${pawLogsSubTab === 'excuses' ? 'active' : ''}`} onClick={() => { setPawLogsSubTab('excuses'); setPawLogsFilter('All'); setPawLogsSearch(''); }}>
+                          <i className="fas fa-calendar-minus"></i> Excuses
+                          <span className="paw-sub-tab-count">{lineupExcuses.length}</span>
+                        </button>
+                        <button className={`paw-sub-tab ${pawLogsSubTab === 'substitutes' ? 'active' : ''}`} onClick={() => { setPawLogsSubTab('substitutes'); setPawLogsFilter('All'); setPawLogsSearch(''); }}>
+                          <i className="fas fa-people-arrows"></i> Substitutes
+                          <span className="paw-sub-tab-count">{subRequests.length}</span>
+                        </button>
+                      </div>
+
+                      {/* ==== EXCUSES SUB-TAB ==== */}
+                      {pawLogsSubTab === 'excuses' && (
+                        <>
+                      {/* Search & Filters */}
+                      <div className="paw-filters-bar">
+                        <div className="paw-search-box">
+                          <i className="fas fa-search"></i>
+                          <input type="text" placeholder="Search by name, reason, date, or role..." value={pawLogsSearch} onChange={(e) => setPawLogsSearch(e.target.value)} />
+                          {pawLogsSearch && <button className="paw-search-clear" onClick={() => setPawLogsSearch('')}><i className="fas fa-times"></i></button>}
+                        </div>
+                        <div className="paw-filter-group">
+                          <div className="paw-filter-pills">
+                            {['All', 'Pending', 'Approved', 'Rejected'].map(s => (
+                              <button key={s} className={`paw-filter-pill ${pawLogsFilter === s ? 'active' : ''} ${s.toLowerCase()}`} onClick={() => setPawLogsFilter(s)}>{s}</button>
+                            ))}
+                          </div>
+                          <select className="paw-role-select" value={pawLogsRoleFilter} onChange={(e) => setPawLogsRoleFilter(e.target.value)}>
+                            <option value="All">All Roles</option>
+                            {PAW_ROLE_TYPES.map(r => <option key={r} value={r}>{r}</option>)}
+                          </select>
+                        </div>
+                      </div>
+
+                      {/* Results Count */}
+                      <div className="paw-results-info">
+                        <span>{getFilteredPawExcuses().length} excuse{getFilteredPawExcuses().length !== 1 ? 's' : ''} found</span>
+                        {(pawLogsFilter !== 'All' || pawLogsRoleFilter !== 'All' || pawLogsSearch) && (
+                          <button className="paw-clear-filters" onClick={() => { setPawLogsFilter('All'); setPawLogsRoleFilter('All'); setPawLogsSearch(''); }}><i className="fas fa-times"></i> Clear filters</button>
                         )}
                       </div>
-                    </div>
-                    );
-                  })}
+
+                      {/* Excuse List */}
+                      {getFilteredPawExcuses().length === 0 ? (
+                        <div className="paw-empty-state">
+                          <i className="fas fa-clipboard-check"></i>
+                          <h3>No Excuses Found</h3>
+                          <p>{pawLogsSearch || pawLogsFilter !== 'All' || pawLogsRoleFilter !== 'All' ? 'Try adjusting your search or filters.' : 'No PAW excuse records yet.'}</p>
+                        </div>
+                      ) : (
+                        <div className="paw-excuse-grid">
+                          {getFilteredPawExcuses().map(exc => {
+                            const pic = getExcuseProfilePic(exc);
+                            const roleColor = PAW_ROLE_COLORS[exc.role_type || 'Song Leader'] || '#926c15';
+                            const isPast = new Date(exc.excuse_date + 'T00:00:00') < new Date(new Date().toDateString());
+                            return (
+                              <div key={exc.id} className={`paw-excuse-card ${exc.status.toLowerCase()}${isPast ? ' past' : ''}`}>
+                                <div className="paw-excuse-card-top">
+                                  <div className="paw-excuse-profile">
+                                    <div className="paw-excuse-avatar" style={{ borderColor: roleColor }}>
+                                      {pic ? <img src={pic} alt="" referrerPolicy="no-referrer" /> : <span>{getInitials(exc.user_name)}</span>}
+                                    </div>
+                                    <div className="paw-excuse-user-info">
+                                      <strong>{exc.user_name}</strong>
+                                      <span className="paw-excuse-role-tag" style={{ background: `${roleColor}15`, color: roleColor }}>
+                                        <i className={`fas ${PAW_ROLE_ICONS[exc.role_type || 'Song Leader']}`}></i> {exc.role_type || 'Song Leader'}
+                                      </span>
+                                    </div>
+                                  </div>
+                                  <span className={`paw-excuse-status ${exc.status.toLowerCase()}`}>{exc.status}</span>
+                                </div>
+                                <div className="paw-excuse-card-body">
+                                  <div className="paw-excuse-date-row">
+                                    <i className="fas fa-calendar-day"></i>
+                                    <span>{formatDate(exc.excuse_date)}</span>
+                                    {isPast && <span className="paw-past-tag">Past</span>}
+                                  </div>
+                                  <p className="paw-excuse-reason-text"><i className="fas fa-quote-left"></i> {exc.reason}</p>
+                                  {exc.admin_note && (
+                                    <div className="paw-excuse-admin-note"><i className="fas fa-comment-dots"></i> <strong>Admin:</strong> {exc.admin_note}</div>
+                                  )}
+                                  {exc.reviewed_by && (
+                                    <div className="paw-excuse-reviewer"><i className="fas fa-user-check"></i> Reviewed by {exc.reviewed_by}</div>
+                                  )}
+                                </div>
+                                <div className="paw-excuse-card-footer">
+                                  <span className="paw-excuse-filed-time"><i className="fas fa-clock"></i> {new Date(exc.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+                                  {exc.status === 'Pending' && (
+                                    <div className="paw-excuse-card-actions">
+                                      <button className="paw-action-sm approve" onClick={() => reviewExcuse(exc.id, 'Approved')}><i className="fas fa-check"></i> Approve</button>
+                                      <button className="paw-action-sm reject" onClick={() => reviewExcuse(exc.id, 'Rejected')}><i className="fas fa-times"></i> Reject</button>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                        </>
+                      )}
+
+                      {/* ==== SUBSTITUTES SUB-TAB ==== */}
+                      {pawLogsSubTab === 'substitutes' && (
+                        <>
+                          {/* Sub Stats Row */}
+                          <div className="paw-stats-row">
+                            <div className="paw-stat-card pending">
+                              <div className="paw-stat-icon"><i className="fas fa-clock"></i></div>
+                              <div className="paw-stat-info">
+                                <span className="paw-stat-num">{getPawSubStats().pending}</span>
+                                <span className="paw-stat-label">Pending</span>
+                              </div>
+                            </div>
+                            <div className="paw-stat-card open-sub">
+                              <div className="paw-stat-icon"><i className="fas fa-broadcast-tower"></i></div>
+                              <div className="paw-stat-info">
+                                <span className="paw-stat-num">{getPawSubStats().open}</span>
+                                <span className="paw-stat-label">Open</span>
+                              </div>
+                            </div>
+                            <div className="paw-stat-card approved">
+                              <div className="paw-stat-icon"><i className="fas fa-check-circle"></i></div>
+                              <div className="paw-stat-info">
+                                <span className="paw-stat-num">{getPawSubStats().accepted}</span>
+                                <span className="paw-stat-label">Accepted</span>
+                              </div>
+                            </div>
+                            <div className="paw-stat-card total">
+                              <div className="paw-stat-icon"><i className="fas fa-clipboard-list"></i></div>
+                              <div className="paw-stat-info">
+                                <span className="paw-stat-num">{getPawSubStats().total}</span>
+                                <span className="paw-stat-label">Total</span>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Search & Filters */}
+                          <div className="paw-filters-bar">
+                            <div className="paw-search-box">
+                              <i className="fas fa-search"></i>
+                              <input type="text" placeholder="Search by name, reason, or date..." value={pawLogsSearch} onChange={(e) => setPawLogsSearch(e.target.value)} />
+                              {pawLogsSearch && <button className="paw-search-clear" onClick={() => setPawLogsSearch('')}><i className="fas fa-times"></i></button>}
+                            </div>
+                            <div className="paw-filter-pills">
+                              {['All', 'Pending', 'Open', 'Approved', 'Rejected'].map(s => (
+                                <button key={s} className={`paw-filter-pill ${pawLogsFilter === s ? 'active' : ''} ${s.toLowerCase()}`} onClick={() => setPawLogsFilter(s)}>{s}</button>
+                              ))}
+                            </div>
+                          </div>
+
+                          {/* Results Count */}
+                          <div className="paw-results-info">
+                            <span>{getFilteredPawSubs().length} substitute request{getFilteredPawSubs().length !== 1 ? 's' : ''} found</span>
+                            {(pawLogsFilter !== 'All' || pawLogsSearch) && (
+                              <button className="paw-clear-filters" onClick={() => { setPawLogsFilter('All'); setPawLogsSearch(''); }}><i className="fas fa-times"></i> Clear filters</button>
+                            )}
+                          </div>
+
+                          {/* Substitute Request Cards */}
+                          {getFilteredPawSubs().length === 0 ? (
+                            <div className="paw-empty-state">
+                              <i className="fas fa-people-arrows"></i>
+                              <h3>No Substitute Requests Found</h3>
+                              <p>{pawLogsSearch || pawLogsFilter !== 'All' ? 'Try adjusting your search or filters.' : 'No substitute requests have been made yet.'}</p>
+                            </div>
+                          ) : (
+                            <div className="paw-excuse-grid">
+                              {getFilteredPawSubs().map(sub => {
+                                const isPast = new Date(sub.schedule_date + 'T00:00:00') < new Date(new Date().toDateString());
+                                const statusClass = sub.status === 'Pending Admin' ? 'pending' : sub.status === 'Open for Sub' ? 'open' : sub.status === 'Accepted' ? 'accepted' : sub.status.toLowerCase();
+                                const statusLabel = sub.status === 'Pending Admin' ? 'Pending' : sub.status === 'Open for Sub' ? 'Open' : sub.status;
+                                return (
+                                  <div key={sub.id} className={`paw-excuse-card sub-card ${statusClass}${isPast ? ' past' : ''}`}>
+                                    <div className="paw-excuse-card-top">
+                                      <div className="paw-excuse-profile">
+                                        <div className="paw-excuse-avatar" style={{ borderColor: '#9c27b0' }}>
+                                          {sub.requester_profile_picture ? <img src={sub.requester_profile_picture} alt="" referrerPolicy="no-referrer" /> : <span>{getInitials(sub.requester_name)}</span>}
+                                        </div>
+                                        <div className="paw-excuse-user-info">
+                                          <strong>{sub.requester_name}</strong>
+                                          <span className="paw-excuse-role-tag" style={{ background: 'rgba(156,39,176,0.1)', color: '#9c27b0' }}>
+                                            <i className="fas fa-microphone"></i> Song Leader
+                                          </span>
+                                        </div>
+                                      </div>
+                                      <span className={`paw-excuse-status ${statusClass}`}>{statusLabel}</span>
+                                    </div>
+                                    <div className="paw-excuse-card-body">
+                                      <div className="paw-excuse-date-row">
+                                        <i className="fas fa-calendar-day"></i>
+                                        <span>{formatDate(sub.schedule_date)}</span>
+                                        {isPast && <span className="paw-past-tag">Past</span>}
+                                      </div>
+                                      <p className="paw-excuse-reason-text"><i className="fas fa-quote-left"></i> {sub.reason}</p>
+                                      {sub.substitute_name && (
+                                        <div className="paw-sub-accepted-info">
+                                          <i className="fas fa-user-check"></i> <strong>{sub.substitute_name}</strong> accepted this substitute request
+                                        </div>
+                                      )}
+                                      {sub.reviewed_by && (
+                                        <div className="paw-excuse-reviewer"><i className="fas fa-user-shield"></i> Reviewed by {sub.reviewed_by}</div>
+                                      )}
+                                      {sub.thank_you_sent && sub.thank_you_message && (
+                                        <div className="paw-sub-thankyou-info"><i className="fas fa-heart"></i> Thank you: &ldquo;{sub.thank_you_message}&rdquo;</div>
+                                      )}
+                                    </div>
+                                    <div className="paw-excuse-card-footer">
+                                      <span className="paw-excuse-filed-time"><i className="fas fa-clock"></i> {new Date(sub.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+                                      {sub.status === 'Pending Admin' && (
+                                        <div className="paw-excuse-card-actions">
+                                          <button className="paw-action-sm approve" onClick={() => adminReviewSub(sub.id, 'approve')}><i className="fas fa-check"></i> Approve</button>
+                                          <button className="paw-action-sm reject" onClick={() => adminReviewSub(sub.id, 'reject')}><i className="fas fa-times"></i> Reject</button>
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </>
+                  )}
+
+                  {/* ---- SONG LEADER: Excuse History (own excuses only) ---- */}
+                  {!isAdmin && (
+                    <>
+                      <div className="paw-history-header">
+                        <div className="paw-history-title">
+                          <i className="fas fa-history"></i>
+                          <h3>My Excuse &amp; Substitution History</h3>
+                        </div>
+                        <p className="paw-history-desc">Track all your filed excuses, substitute requests, and their status.</p>
+                      </div>
+
+                      {/* Mini Stats */}
+                      <div className="paw-stats-row mini">
+                        <div className="paw-stat-card pending">
+                          <div className="paw-stat-icon"><i className="fas fa-clock"></i></div>
+                          <div className="paw-stat-info">
+                            <span className="paw-stat-num">{getMyExcuses().filter(e => e.status === 'Pending').length}</span>
+                            <span className="paw-stat-label">Pending</span>
+                          </div>
+                        </div>
+                        <div className="paw-stat-card approved">
+                          <div className="paw-stat-icon"><i className="fas fa-check-circle"></i></div>
+                          <div className="paw-stat-info">
+                            <span className="paw-stat-num">{getMyExcuses().filter(e => e.status === 'Approved').length}</span>
+                            <span className="paw-stat-label">Approved</span>
+                          </div>
+                        </div>
+                        <div className="paw-stat-card sub-stat">
+                          <div className="paw-stat-icon"><i className="fas fa-people-arrows"></i></div>
+                          <div className="paw-stat-info">
+                            <span className="paw-stat-num">{getMySubRequests().length}</span>
+                            <span className="paw-stat-label">Sub Requests</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* My Sub Requests Section */}
+                      {getMySubRequests().length > 0 && (
+                        <div className="paw-sub-history-section">
+                          <h4 className="paw-sub-history-title"><i className="fas fa-people-arrows"></i> My Substitute Requests</h4>
+                          <div className="paw-excuse-grid">
+                            {getMySubRequests().map(sub => {
+                              const isPast = new Date(sub.schedule_date + 'T00:00:00') < new Date(new Date().toDateString());
+                              return (
+                                <div key={sub.id} className={`paw-excuse-card sub-card ${sub.status === 'Accepted' ? 'accepted' : sub.status === 'Open for Sub' ? 'open' : sub.status === 'Pending Admin' ? 'pending' : sub.status.toLowerCase()}${isPast ? ' past' : ''}`}>
+                                  <div className="paw-excuse-card-top">
+                                    <div className="paw-excuse-profile">
+                                      <div className="paw-excuse-avatar" style={{ borderColor: '#9c27b0' }}>
+                                        {userData?.profile_picture ? <img src={userData.profile_picture} alt="" referrerPolicy="no-referrer" /> : <span>{getInitials(`${userData?.firstname} ${userData?.lastname}`)}</span>}
+                                      </div>
+                                      <div className="paw-excuse-user-info">
+                                        <strong>{userData?.firstname} {userData?.lastname}</strong>
+                                        <span className="paw-excuse-role-tag" style={{ background: 'rgba(156,39,176,0.1)', color: '#9c27b0' }}>
+                                          <i className="fas fa-people-arrows"></i> Sub Request
+                                        </span>
+                                      </div>
+                                    </div>
+                                    <span className={`paw-excuse-status ${sub.status === 'Pending Admin' ? 'pending' : sub.status === 'Open for Sub' ? 'open' : sub.status.toLowerCase()}`}>
+                                      {sub.status === 'Pending Admin' ? 'Pending' : sub.status}
+                                    </span>
+                                  </div>
+                                  <div className="paw-excuse-card-body">
+                                    <div className="paw-excuse-date-row">
+                                      <i className="fas fa-calendar-day"></i>
+                                      <span>{formatDate(sub.schedule_date)}</span>
+                                      {isPast && <span className="paw-past-tag">Past</span>}
+                                    </div>
+                                    <p className="paw-excuse-reason-text"><i className="fas fa-quote-left"></i> {sub.reason}</p>
+                                    {sub.substitute_name && (
+                                      <div className="paw-sub-accepted-info">
+                                        <i className="fas fa-user-check"></i> Substituted by <strong>{sub.substitute_name}</strong>
+                                      </div>
+                                    )}
+                                    {sub.admin_note && (
+                                      <div className="paw-excuse-admin-note"><i className="fas fa-comment-dots"></i> <strong>Admin:</strong> {sub.admin_note}</div>
+                                    )}
+                                  </div>
+                                  <div className="paw-excuse-card-footer">
+                                    <span className="paw-excuse-filed-time"><i className="fas fa-clock"></i> {new Date(sub.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+                                    {sub.status === 'Pending Admin' && !isPast && (
+                                      <button className="paw-action-sm cancel" onClick={() => cancelSubRequest(sub.id)}><i className="fas fa-times"></i> Cancel</button>
+                                    )}
+                                    {sub.status === 'Accepted' && !sub.thank_you_sent && !isPast && (
+                                      <button className="paw-action-sm thankyou" onClick={() => { setSubThankYouModal({ subId: sub.id, subName: sub.substitute_name }); setSubThankYouMessage(''); }}>
+                                        <i className="fas fa-heart"></i> Thank You
+                                      </button>
+                                    )}
+                                    {sub.thank_you_sent && (
+                                      <span className="lu-sub-thankyou-sent"><i className="fas fa-check-circle"></i> Thanked</span>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Search + filter */}
+                      <div className="paw-filters-bar">
+                        <div className="paw-search-box">
+                          <i className="fas fa-search"></i>
+                          <input type="text" placeholder="Search by date or reason..." value={pawLogsSearch} onChange={(e) => setPawLogsSearch(e.target.value)} />
+                          {pawLogsSearch && <button className="paw-search-clear" onClick={() => setPawLogsSearch('')}><i className="fas fa-times"></i></button>}
+                        </div>
+                        <div className="paw-filter-pills">
+                          {['All', 'Pending', 'Approved', 'Rejected'].map(s => (
+                            <button key={s} className={`paw-filter-pill ${pawLogsFilter === s ? 'active' : ''} ${s.toLowerCase()}`} onClick={() => setPawLogsFilter(s)}>{s}</button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* My Excuse List */}
+                      {(() => {
+                        const myFiltered = getMyExcuses().filter(e => {
+                          if (pawLogsFilter !== 'All' && e.status !== pawLogsFilter) return false;
+                          if (pawLogsSearch.trim()) {
+                            const q = pawLogsSearch.toLowerCase();
+                            return e.reason?.toLowerCase().includes(q) || e.excuse_date?.includes(q) || (e.role_type || '').toLowerCase().includes(q);
+                          }
+                          return true;
+                        });
+                        return myFiltered.length === 0 ? (
+                          <div className="paw-empty-state">
+                            <i className="fas fa-clipboard-check"></i>
+                            <h3>No Excuses Found</h3>
+                            <p>{pawLogsSearch || pawLogsFilter !== 'All' ? 'Try adjusting your search or filter.' : 'You haven\'t filed any excuses yet. Go to the calendar and tap a free date to file one.'}</p>
+                          </div>
+                        ) : (
+                          <div className="paw-excuse-grid">
+                            {myFiltered.map(exc => {
+                              const isPast = new Date(exc.excuse_date + 'T00:00:00') < new Date(new Date().toDateString());
+                              const roleColor = PAW_ROLE_COLORS[exc.role_type || 'Song Leader'] || '#926c15';
+                              return (
+                                <div key={exc.id} className={`paw-excuse-card ${exc.status.toLowerCase()}${isPast ? ' past' : ''}`}>
+                                  <div className="paw-excuse-card-top">
+                                    <div className="paw-excuse-profile">
+                                      <div className="paw-excuse-avatar" style={{ borderColor: roleColor }}>
+                                        {userData?.profile_picture ? <img src={userData.profile_picture} alt="" referrerPolicy="no-referrer" /> : <span>{getInitials(`${userData?.firstname} ${userData?.lastname}`)}</span>}
+                                      </div>
+                                      <div className="paw-excuse-user-info">
+                                        <strong>{userData?.firstname} {userData?.lastname}</strong>
+                                        <span className="paw-excuse-role-tag" style={{ background: `${roleColor}15`, color: roleColor }}>
+                                          <i className={`fas ${PAW_ROLE_ICONS[exc.role_type || 'Song Leader']}`}></i> {exc.role_type || 'Song Leader'}
+                                        </span>
+                                      </div>
+                                    </div>
+                                    <span className={`paw-excuse-status ${exc.status.toLowerCase()}`}>{exc.status}</span>
+                                  </div>
+                                  <div className="paw-excuse-card-body">
+                                    <div className="paw-excuse-date-row">
+                                      <i className="fas fa-calendar-day"></i>
+                                      <span>{formatDate(exc.excuse_date)}</span>
+                                      {isPast && <span className="paw-past-tag">Past</span>}
+                                    </div>
+                                    <p className="paw-excuse-reason-text"><i className="fas fa-quote-left"></i> {exc.reason}</p>
+                                    {exc.admin_note && (
+                                      <div className="paw-excuse-admin-note"><i className="fas fa-comment-dots"></i> <strong>Admin:</strong> {exc.admin_note}</div>
+                                    )}
+                                  </div>
+                                  <div className="paw-excuse-card-footer">
+                                    <span className="paw-excuse-filed-time"><i className="fas fa-clock"></i> {new Date(exc.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+                                    {exc.status === 'Pending' && !isPast && (
+                                      <button className="paw-action-sm cancel" onClick={() => cancelExcuse(exc.id)}><i className="fas fa-times"></i> Cancel</button>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        );
+                      })()}
+                    </>
+                  )}
                 </div>
               )}
             </section>

@@ -24,6 +24,9 @@ export async function GET() {
       fastSongs: s.fast_songs || [],
       submittedBy: s.submitted_by,
       status: s.status,
+      // Substitute tracking — clean, no reason
+      hasSubstitute: !!s.original_song_leader,
+      originalSongLeader: s.original_song_leader || null,
     }));
 
     return NextResponse.json({ success: true, data: formatted });

@@ -76,7 +76,7 @@ export default function HomePage() {
     }
     const saved = localStorage.getItem('darkModeEnabled') === 'true';
     setDarkMode(saved);
-    if (saved) document.body.classList.add('dark-mode');
+    if (saved) { document.body.classList.add('dark-mode'); document.documentElement.classList.add('dark-mode'); }
   }, [router]);
 
   // ---- Hero auto-rotate ----
@@ -144,6 +144,7 @@ export default function HomePage() {
     setDarkMode(next);
     localStorage.setItem('darkModeEnabled', next);
     document.body.classList.toggle('dark-mode', next);
+    document.documentElement.classList.toggle('dark-mode', next);
   };
 
   const goSlide = (i) => {

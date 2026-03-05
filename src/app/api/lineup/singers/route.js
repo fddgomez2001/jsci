@@ -3,7 +3,7 @@ import { supabase } from '@/lib/supabase';
 
 // GET - Fetch users who can be backup singers OR song leaders
 // type=song-leaders -> Ministry: Praise And Worship, Sub Role: Song Leaders
-// type=backupers -> Ministry: Praise And Worship, Sub Role: Song Leader Backupers
+// type=backupers -> Ministry: Praise And Worship, Sub Role: Backup Singer
 // type=all-paw -> All Praise And Worship ministry members
 export async function GET(request) {
   try {
@@ -11,16 +11,16 @@ export async function GET(request) {
     const type = searchParams.get('type') || 'all-paw';
 
     let query = supabase.from('users')
-      .select('id, firstname, lastname, email, ministry, sub_role, role')
+      .select('id, firstname, lastname, email, ministry, sub_role, role, profile_picture')
       .eq('is_active', true)
       .eq('status', 'Verified');
 
     if (type === 'song-leaders') {
-      // Get users with ministry Praise And Worship AND sub_role Song Leaders
-      query = query.eq('ministry', 'Praise And Worship').eq('sub_role', 'Song Leaders');
+      // Get users with ministry Praise And Worship AND sub_role containing Song Leaders
+      query = query.eq('ministry', 'Praise And Worship').ilike('sub_role', '%Song Leaders%');
     } else if (type === 'backupers') {
-      // Get users with ministry Praise And Worship AND sub_role Song Leader Backupers
-      query = query.eq('ministry', 'Praise And Worship').eq('sub_role', 'Song Leader Backupers');
+      // Get users with ministry Praise And Worship AND sub_role Backup Singer
+      query = query.eq('ministry', 'Praise And Worship').ilike('sub_role', '%Backup Singer%');
     } else {
       // Get all Praise And Worship ministry members
       query = query.eq('ministry', 'Praise And Worship');
@@ -39,6 +39,7 @@ export async function GET(request) {
       ministry: u.ministry,
       sub_role: u.sub_role,
       role: u.role,
+      profile_picture: u.profile_picture || null,
     }));
 
     return NextResponse.json({ success: true, data: singers });

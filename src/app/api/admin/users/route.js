@@ -22,7 +22,7 @@ export async function GET(request) {
     const status = searchParams.get('status');
 
     let query = supabase.from('users')
-      .select('id, member_id, firstname, lastname, email, birthdate, ministry, sub_role, role, status, is_active, last_login, created_at, allowed_event_types')
+      .select('id, member_id, firstname, lastname, email, birthdate, ministry, sub_role, role, status, is_active, last_login, created_at, allowed_event_types, profile_picture')
       .order('created_at', { ascending: false });
 
     const subRole = searchParams.get('sub_role');

@@ -344,6 +344,7 @@ export function getSidebarMenu(role, userData) {
       { id: 'users', icon: 'fas fa-users-cog', label: 'User Management', section: 'user-management' },
       { id: 'roles', icon: 'fas fa-shield-alt', label: 'Roles & Permissions', section: 'roles-permissions' },
       { id: 'ministries', icon: 'fas fa-church', label: 'Ministry Management', section: 'ministry-management' },
+      { id: 'praise-worship', icon: 'fas fa-hands-praying', label: 'Praise & Worship', section: 'praise-worship' },
       { id: 'events', icon: 'fas fa-calendar-alt', label: 'Events', section: 'events-management' },
       { id: 'announcements', icon: 'fas fa-bullhorn', label: 'Announcements', section: 'announcements-management' },
       { id: 'attendance', icon: 'fas fa-clipboard-check', label: 'Attendance', section: 'attendance-management' },
@@ -362,7 +363,7 @@ export function getSidebarMenu(role, userData) {
       { id: 'users', icon: 'fas fa-users-cog', label: 'User Management', section: 'user-management' },
       { id: 'ministries', icon: 'fas fa-church', label: 'Ministry Management', section: 'ministry-management' },
       { id: 'lineup', icon: 'fas fa-music', label: 'Assign Lineup', section: 'create-lineup' },
-      { id: 'my-lineups', icon: 'fas fa-list-ol', label: 'All Assignments', section: 'my-lineups' },
+      { id: 'praise-worship', icon: 'fas fa-hands-praying', label: 'Praise & Worship', section: 'praise-worship' },
       { id: 'events', icon: 'fas fa-calendar-alt', label: 'Events', section: 'events-management' },
       { id: 'announcements', icon: 'fas fa-bullhorn', label: 'Announcements', section: 'announcements-management' },
       { id: 'attendance', icon: 'fas fa-clipboard-check', label: 'Attendance', section: 'attendance-management' },
@@ -380,6 +381,7 @@ export function getSidebarMenu(role, userData) {
       { id: 'ministries', icon: 'fas fa-church', label: 'Ministry Oversight', section: 'ministry-oversight' },
       { id: 'events', icon: 'fas fa-calendar-alt', label: 'Events', section: 'events-management' },
       { id: 'user-events-oversight', icon: 'fas fa-calendar-plus', label: 'User Events', section: 'user-events-oversight' },
+      { id: 'praise-worship', icon: 'fas fa-hands-praying', label: 'Praise & Worship', section: 'praise-worship' },
       { id: 'announcements', icon: 'fas fa-bullhorn', label: 'Announcements', section: 'announcements-management' },
       { id: 'attendance', icon: 'fas fa-clipboard-check', label: 'Attendance', section: 'attendance-management' },
       { id: 'community', icon: 'fas fa-comments', label: 'Community Hub', section: 'community-hub' },
@@ -429,10 +431,16 @@ export function getSidebarMenu(role, userData) {
     { id: 'schedule', icon: 'fas fa-calendar-week', label: 'Weekly Schedule', section: 'weekly-schedule' },
   ];
 
-  // Song Leader gets Create Lineup + My Lineups
+  // Praise & Worship page — accessible to PAW ministry sub-roles, Media, Dancers, Pastors
+  const pawMinistries = ['Praise And Worship', 'Media', 'Dancers', 'Pastors'];
+  const userMinistry = userData?.ministry || '';
+  if (pawMinistries.includes(userMinistry)) {
+    menu.push({ id: 'praise-worship', icon: 'fas fa-hands-praying', label: 'Praise & Worship', section: 'praise-worship' });
+  }
+
+  // Song Leader gets Create Lineup (My Lineups merged inside)
   if (role === ROLES.SONG_LEADER) {
     menu.push({ id: 'lineup', icon: 'fas fa-music', label: 'Create Lineup', section: 'create-lineup' });
-    menu.push({ id: 'my-lineups', icon: 'fas fa-list-ol', label: 'My Lineups', section: 'my-lineups' });
   }
 
   // Song Leader & Leader get Ministry Meetings create

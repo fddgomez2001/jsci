@@ -40,7 +40,7 @@ export default function LoginPage() {
     // Dark mode
     const saved = localStorage.getItem('darkModeEnabled') === 'true';
     setDarkMode(saved);
-    if (saved) document.body.classList.add('dark-mode');
+    if (saved) { document.body.classList.add('dark-mode'); document.documentElement.classList.add('dark-mode'); }
   }, [router]);
 
   const toggleDarkMode = () => {
@@ -48,6 +48,7 @@ export default function LoginPage() {
     setDarkMode(next);
     localStorage.setItem('darkModeEnabled', next);
     document.body.classList.toggle('dark-mode', next);
+    document.documentElement.classList.toggle('dark-mode', next);
   };
 
   const showAlert = (message, type) => {
