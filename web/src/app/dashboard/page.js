@@ -437,6 +437,23 @@ export default function DashboardPage() {
   const [showAnnouncementForm, setShowAnnouncementForm] = useState(false);
   const [editingAnnouncement, setEditingAnnouncement] = useState(null);
 
+  // Birthday Greetings
+  const [birthdayGreetings, setBirthdayGreetings] = useState({});
+  const [birthdayGreetingText, setBirthdayGreetingText] = useState({});
+  const [birthdayGreetingEmoji, setBirthdayGreetingEmoji] = useState({});
+  const [birthdayGreetingSending, setBirthdayGreetingSending] = useState({});
+  const [birthdayGreetingAnim, setBirthdayGreetingAnim] = useState({});
+  const [showBirthdayGreetings, setShowBirthdayGreetings] = useState(null);
+  const [myBirthdayGreetings, setMyBirthdayGreetings] = useState([]);
+  const [showMyBirthdayGreetings, setShowMyBirthdayGreetings] = useState(false);
+  // Community birthday card
+  const [communityBdayComments, setCommunityBdayComments] = useState({});
+  const [communityBdayCommentInput, setCommunityBdayCommentInput] = useState({});
+  const [communityBdayLiked, setCommunityBdayLiked] = useState({});
+  const [communityBdayLikeCount, setCommunityBdayLikeCount] = useState({});
+  const [communityBdayLikeAnim, setCommunityBdayLikeAnim] = useState({});
+  const [showCommunityBdayComments, setShowCommunityBdayComments] = useState({});
+
   // Meetings
   const [meetings, setMeetings] = useState([]);
   const [meetingForm, setMeetingForm] = useState({ title: '', description: '', meetingDate: '', location: '' });
@@ -1187,7 +1204,7 @@ export default function DashboardPage() {
   // ============================================
   const loadLiveStreams = async () => {
     try {
-      const res = await fetch('/api/live-streams');
+      const res = await fetch('/api/live-streams?active=false');
       const data = await res.json();
       if (Array.isArray(data)) {
         setLiveStreams(data);
@@ -2190,6 +2207,124 @@ export default function DashboardPage() {
     const data = await res.json();
     showToast(data.message, data.success ? 'success' : 'danger');
     if (data.success) loadAnnouncements();
+  };
+
+  // -- Birthday Greetings --
+  const BIRTHDAY_EMOJIS = ['🎂', '🎉', '🎁', '🥳', '🎈', '🎊', '💐', '🌟', '❤️', '🙏', '✨', '🕊️'];
+
+  const loadBirthdayGreetings = async (celebrantName) => {
+    try {
+      const res = await fetch(`/api/birthday-greetings?celebrant_name=${encodeURIComponent(celebrantName)}&today=true`);
+      const data = await res.json();
+      if (data.success) {
+        setBirthdayGreetings(prev => ({ ...prev, [celebrantName]: data.data }));
+      }
+    } catch { /* silent */ }
+  };
+
+  const loadMyBirthdayGreetings = async () => {
+    try {
+      const res = await fetch(`/api/birthday-greetings?celebrant_id=${userData?.id}&today=true`);
+      const data = await res.json();
+      if (data.success) {
+        setMyBirthdayGreetings(data.data);
+        // Mark as read
+        if (data.data.length > 0) {
+          fetch('/api/birthday-greetings', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ celebrant_user_id: userData?.id }),
+          });
+        }
+      }
+    } catch { /* silent */ }
+  };
+
+  const handleSendBirthdayGreeting = async (celebrant) => {
+    const msg = birthdayGreetingText[celebrant.fullName]?.trim();
+    if (!msg) { showToast('Please write a birthday message!', 'warning'); return; }
+    
+    setBirthdayGreetingSending(prev => ({ ...prev, [celebrant.fullName]: true }));
+    // Start the gift animation
+    setBirthdayGreetingAnim(prev => ({ ...prev, [celebrant.fullName]: 'sending' }));
+
+    try {
+      const res = await fetch('/api/birthday-greetings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          celebrant_user_id: celebrant.id || null,
+          celebrant_name: celebrant.fullName,
+          sender_user_id: userData?.id,
+          sender_name: `${userData?.firstname} ${userData?.lastname}`,
+          sender_picture: userData?.profile_picture || null,
+          message: msg,
+          emoji: birthdayGreetingEmoji[celebrant.fullName] || '🎂',
+        }),
+      });
+      const data = await res.json();
+
+      // Wait for animation to complete
+      await new Promise(r => setTimeout(r, 1800));
+      setBirthdayGreetingAnim(prev => ({ ...prev, [celebrant.fullName]: 'delivered' }));
+      await new Promise(r => setTimeout(r, 1200));
+
+      if (data.success) {
+        showToast(`🎉 Birthday greeting sent to ${celebrant.fullName}!`, 'success');
+        setBirthdayGreetingText(prev => ({ ...prev, [celebrant.fullName]: '' }));
+        setBirthdayGreetingEmoji(prev => ({ ...prev, [celebrant.fullName]: '🎂' }));
+        loadBirthdayGreetings(celebrant.fullName);
+      } else {
+        showToast(data.message || 'Failed to send greeting', 'danger');
+      }
+    } catch (e) { showToast('Error: ' + e.message, 'danger'); }
+    
+    setBirthdayGreetingSending(prev => ({ ...prev, [celebrant.fullName]: false }));
+    setBirthdayGreetingAnim(prev => ({ ...prev, [celebrant.fullName]: null }));
+  };
+
+  // Birthday Verses for Community Card
+  const BIRTHDAY_VERSES = [
+    { verse: 'The Lord bless you and keep you; the Lord make his face shine on you and be gracious to you.', ref: 'Numbers 6:24-25' },
+    { verse: 'For I know the plans I have for you, declares the Lord, plans to prosper you and not to harm you, plans to give you hope and a future.', ref: 'Jeremiah 29:11' },
+    { verse: 'May He give you the desire of your heart and make all your plans succeed.', ref: 'Psalm 20:4' },
+    { verse: 'This is the day the Lord has made; let us rejoice and be glad in it.', ref: 'Psalm 118:24' },
+    { verse: 'Every good and perfect gift is from above, coming down from the Father of the heavenly lights.', ref: 'James 1:17' },
+    { verse: 'Delight yourself in the Lord, and he will give you the desires of your heart.', ref: 'Psalm 37:4' },
+    { verse: 'He has made everything beautiful in its time.', ref: 'Ecclesiastes 3:11' },
+    { verse: 'I praise you because I am fearfully and wonderfully made; your works are wonderful, I know that full well.', ref: 'Psalm 139:14' },
+  ];
+  const getBirthdayVerse = (name) => {
+    let hash = 0;
+    for (let i = 0; i < (name || '').length; i++) hash = ((hash << 5) - hash) + name.charCodeAt(i);
+    const idx = Math.abs(hash + new Date().getDate()) % BIRTHDAY_VERSES.length;
+    return BIRTHDAY_VERSES[idx];
+  };
+
+  // Community Birthday Card - Like / Comment
+  const handleCommunityBdayLike = (celebrantName) => {
+    const liked = communityBdayLiked[celebrantName];
+    setCommunityBdayLiked(prev => ({ ...prev, [celebrantName]: !liked }));
+    setCommunityBdayLikeCount(prev => ({ ...prev, [celebrantName]: (prev[celebrantName] || 0) + (liked ? -1 : 1) }));
+    setCommunityBdayLikeAnim(prev => ({ ...prev, [celebrantName]: true }));
+    setTimeout(() => setCommunityBdayLikeAnim(prev => ({ ...prev, [celebrantName]: false })), 600);
+  };
+
+  const handleCommunityBdayComment = (celebrantName) => {
+    const text = communityBdayCommentInput[celebrantName]?.trim();
+    if (!text) return;
+    const newComment = {
+      id: Date.now(),
+      author: `${userData?.firstname} ${userData?.lastname}`,
+      picture: userData?.profile_picture || null,
+      content: text,
+      time: new Date().toISOString(),
+    };
+    setCommunityBdayComments(prev => ({
+      ...prev,
+      [celebrantName]: [...(prev[celebrantName] || []), newComment],
+    }));
+    setCommunityBdayCommentInput(prev => ({ ...prev, [celebrantName]: '' }));
   };
 
   // -- Meetings --
@@ -4682,6 +4817,11 @@ Examples:
             {todaysBirthdays.length > 0 && (
               <div className="birthday-section-v2">
                 <h3 className="birthday-section-title"><i className="fas fa-birthday-cake"></i> Birthday Today! 🎂</h3>
+                {todaysBirthdays.some(b => b.id === userData?.id) && (
+                  <button className="bday-greet-read-mine-btn" style={{ marginBottom: 10 }} onClick={() => { loadMyBirthdayGreetings(); setShowMyBirthdayGreetings(true); }}>
+                    <i className="fas fa-gift"></i> Open My Birthday Greetings 🎁
+                  </button>
+                )}
                 <div className="birthday-cards-grid">
                   {todaysBirthdays.map((b, i) => (
                     <div key={i} className="birthday-card-v2">
@@ -4695,8 +4835,13 @@ Examples:
                         <span className="birthday-cake-icon">🎂</span>
                       </div>
                       <div className="birthday-card-info">
-                        <span className="birthday-card-name">{b.fullName}</span>
+                        <span className="birthday-card-name bday-greet-celebrant-name">{b.fullName}</span>
                         <span className="birthday-card-ministry"><i className="fas fa-church"></i> {b.ministry || 'Member'}</span>
+                        {b.id !== userData?.id && (
+                          <button className="bday-greet-quick-btn" onClick={() => showSection('announcements')}>
+                            <i className="fas fa-gift"></i> Send Greetings
+                          </button>
+                        )}
                       </div>
                     </div>
                   ))}
@@ -4783,28 +4928,154 @@ Examples:
               </div>
             )}
 
-            {/* Birthday Announcements */}
+            {/* Birthday Announcements with Greetings */}
             {todaysBirthdays.length > 0 && (
-              <div className="birthday-section-v2">
-                <h3 className="birthday-section-title"><i className="fas fa-birthday-cake"></i> Happy Birthday! 🎂</h3>
-                <div className="birthday-cards-grid">
-                  {todaysBirthdays.map((b, i) => (
-                    <div key={i} className="birthday-card-v2 birthday-today">
-                      <div className="birthday-card-confetti"></div>
-                      <div className="birthday-card-avatar">
-                        {b.profile_picture ? (
-                          <img src={b.profile_picture} alt={b.fullName} referrerPolicy="no-referrer" />
-                        ) : (
-                          <span className="birthday-card-initials">{b.firstname?.[0]}{b.lastname?.[0]}</span>
-                        )}
-                        <span className="birthday-cake-icon">🎂</span>
+              <div className="bday-announce-section">
+                <div className="bday-announce-header">
+                  <span className="bday-announce-header-icon">🎂</span>
+                  <div>
+                    <h3 className="bday-announce-header-title">Happy Birthday!</h3>
+                    <p className="bday-announce-header-sub">Send a private birthday message to our celebrants today</p>
+                  </div>
+                </div>
+
+                {/* Check if current user is a birthday celebrant */}
+                {todaysBirthdays.some(b => b.id === userData?.id) && (
+                  <button className="bday-greet-read-mine-btn" onClick={() => { loadMyBirthdayGreetings(); setShowMyBirthdayGreetings(true); }}>
+                    <i className="fas fa-gift"></i> Open My Birthday Greetings 🎁
+                  </button>
+                )}
+
+                {todaysBirthdays.map((b, i) => {
+                  const isMe = b.id === userData?.id;
+                  const greetingsForThis = birthdayGreetings[b.fullName] || [];
+                  const animState = birthdayGreetingAnim[b.fullName];
+                  const isSending = birthdayGreetingSending[b.fullName];
+                  return (
+                    <div key={i} className="bday-announce-card">
+                      {/* Hero banner for celebrant */}
+                      <div className="bday-announce-card-hero">
+                        <div className="bday-announce-card-confetti-left">🎊</div>
+                        <div className="bday-announce-card-confetti-right">🎉</div>
+                        <div className="bday-announce-card-avatar-big">
+                          {b.profile_picture ? (
+                            <img src={b.profile_picture} alt={b.fullName} referrerPolicy="no-referrer" />
+                          ) : (
+                            <span className="bday-announce-card-initials">{b.firstname?.[0]}{b.lastname?.[0]}</span>
+                          )}
+                          <span className="bday-announce-card-cake">🎂</span>
+                        </div>
+                        <h2 className="bday-announce-card-name">{b.fullName}</h2>
+                        <span className="bday-announce-card-role"><i className="fas fa-church"></i> {b.ministry || 'Member'}</span>
+                        <span className="bday-announce-card-date"><i className="fas fa-calendar-day"></i> {new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}</span>
                       </div>
-                      <div className="birthday-card-info">
-                        <span className="birthday-card-name">{b.fullName}</span>
-                        <span className="birthday-card-ministry"><i className="fas fa-church"></i> {b.ministry || 'Member'}</span>
+
+                      {/* Private greeting count */}
+                      <div className="bday-announce-card-body">
+                        <button className="bday-greet-count-btn" onClick={() => { loadBirthdayGreetings(b.fullName); setShowBirthdayGreetings(showBirthdayGreetings === b.fullName ? null : b.fullName); }}>
+                          <i className="fas fa-envelope-open-text"></i> {greetingsForThis.length} Private Message{greetingsForThis.length !== 1 ? 's' : ''}
+                        </button>
+
+                        {/* Send private greeting form (not for self) */}
+                        {!isMe && (
+                          <div className={`bday-greet-form-wrapper${animState ? ` bday-anim-${animState}` : ''}`}>
+                            <div className="bday-greet-form-label"><i className="fas fa-lock"></i> Private Birthday Message</div>
+                            <div className="bday-greet-gift-box">
+                              <div className="bday-greet-gift-lid">🎁</div>
+                              {animState === 'delivered' && <div className="bday-greet-gift-sparkle">✨</div>}
+                            </div>
+                            <div className="bday-greet-message-bubble">
+                              <div className="bday-greet-emoji-picker">
+                                {BIRTHDAY_EMOJIS.map(em => (
+                                  <button key={em} className={`bday-greet-emoji-btn${(birthdayGreetingEmoji[b.fullName] || '🎂') === em ? ' active' : ''}`} onClick={() => setBirthdayGreetingEmoji(prev => ({ ...prev, [b.fullName]: em }))}>
+                                    {em}
+                                  </button>
+                                ))}
+                              </div>
+                              <div className="bday-greet-input-row">
+                                <input
+                                  type="text"
+                                  className="bday-greet-input"
+                                  placeholder={`Send a private birthday message to ${b.firstname}...`}
+                                  value={birthdayGreetingText[b.fullName] || ''}
+                                  onChange={(e) => setBirthdayGreetingText(prev => ({ ...prev, [b.fullName]: e.target.value }))}
+                                  onKeyDown={(e) => { if (e.key === 'Enter' && !isSending) handleSendBirthdayGreeting(b); }}
+                                  disabled={isSending}
+                                />
+                                <button className="bday-greet-send-btn" onClick={() => handleSendBirthdayGreeting(b)} disabled={isSending}>
+                                  {isSending ? <i className="fas fa-spinner fa-spin"></i> : <><i className="fas fa-gift"></i> Send Gift</>}
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Show private greetings list */}
+                        {showBirthdayGreetings === b.fullName && greetingsForThis.length > 0 && (
+                          <div className="bday-greet-list">
+                            <h4 className="bday-greet-list-title"><i className="fas fa-lock"></i> Private Messages for <strong>{b.fullName}</strong></h4>
+                            {greetingsForThis.map((g, gi) => (
+                              <div key={g.id} className="bday-greet-item" style={{ animationDelay: `${gi * 0.08}s` }}>
+                                <div className="bday-greet-item-avatar">
+                                  {g.sender_picture ? (
+                                    <img src={g.sender_picture} alt={g.sender_name} referrerPolicy="no-referrer" />
+                                  ) : (
+                                    <span className="bday-greet-item-initials">{g.sender_name?.split(' ').map(n => n[0]).join('')}</span>
+                                  )}
+                                </div>
+                                <div className="bday-greet-item-body">
+                                  <span className="bday-greet-item-sender">{g.sender_name}</span>
+                                  <p className="bday-greet-item-msg">{g.emoji} {g.message}</p>
+                                  <span className="bday-greet-item-time">{new Date(g.created_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}</span>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     </div>
-                  ))}
+                  );
+                })}
+              </div>
+            )}
+
+            {/* My Birthday Greetings Modal (for celebrant) */}
+            {showMyBirthdayGreetings && (
+              <div className="bday-greet-modal-overlay" onClick={() => setShowMyBirthdayGreetings(false)}>
+                <div className="bday-greet-modal" onClick={e => e.stopPropagation()}>
+                  <button className="bday-greet-modal-close" onClick={() => setShowMyBirthdayGreetings(false)}>
+                    <i className="fas fa-times"></i>
+                  </button>
+                  <div className="bday-greet-modal-header">
+                    <div className="bday-greet-modal-gift-anim">🎁</div>
+                    <h3>Happy Birthday, {userData?.firstname}! 🎉</h3>
+                    <p>You have {myBirthdayGreetings.length} birthday greeting{myBirthdayGreetings.length !== 1 ? 's' : ''} from your church family!</p>
+                  </div>
+                  <div className="bday-greet-modal-list">
+                    {myBirthdayGreetings.length === 0 ? (
+                      <div className="bday-greet-modal-empty">
+                        <span>🎂</span>
+                        <p>No greetings yet — they&apos;re on the way!</p>
+                      </div>
+                    ) : (
+                      myBirthdayGreetings.map((g, gi) => (
+                        <div key={g.id} className="bday-greet-modal-item" style={{ animationDelay: `${gi * 0.12}s` }}>
+                          <div className="bday-greet-modal-item-avatar">
+                            {g.sender_picture ? (
+                              <img src={g.sender_picture} alt={g.sender_name} referrerPolicy="no-referrer" />
+                            ) : (
+                              <span className="bday-greet-modal-item-initials">{g.sender_name?.split(' ').map(n => n[0]).join('')}</span>
+                            )}
+                          </div>
+                          <div className="bday-greet-modal-item-body">
+                            <span className="bday-greet-modal-item-sender">{g.sender_name}</span>
+                            <p className="bday-greet-modal-item-msg">{g.emoji} {g.message}</p>
+                            <span className="bday-greet-modal-item-time">{new Date(g.created_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}</span>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
                 </div>
               </div>
             )}
@@ -4907,6 +5178,106 @@ Examples:
                 <span className="community-kindness-reminder">Please keep posts uplifting, respectful, and God-honoring. This is a safe space for our church family 💛</span>
               </div>
             </div>
+
+            {/* === 🎂 COMMUNITY BIRTHDAY CELEBRATION CARDS (24hrs) === */}
+            {todaysBirthdays.length > 0 && (
+              <div className="cbday-section">
+                <div className="cbday-section-header">
+                  <span className="cbday-section-icon">🎂</span>
+                  <div>
+                    <h3 className="cbday-section-title">Birthday Celebrations Today!</h3>
+                    <p className="cbday-section-sub">Wish our celebrants a blessed birthday 🎉</p>
+                  </div>
+                  <span className="cbday-24h-badge"><i className="fas fa-clock"></i> 24h</span>
+                </div>
+
+                {todaysBirthdays.map((b, i) => {
+                  const verse = getBirthdayVerse(b.fullName);
+                  const liked = communityBdayLiked[b.fullName];
+                  const likeCount = communityBdayLikeCount[b.fullName] || 0;
+                  const likeAnim = communityBdayLikeAnim[b.fullName];
+                  const comments = communityBdayComments[b.fullName] || [];
+                  const showComms = showCommunityBdayComments[b.fullName];
+                  return (
+                    <div key={i} className="cbday-card">
+                      {/* Confetti decorations */}
+                      <div className="cbday-card-confetti">
+                        <span>🎊</span><span>✨</span><span>🎉</span><span>🎈</span><span>⭐</span><span>🎊</span>
+                      </div>
+
+                      {/* Hero section with big avatar */}
+                      <div className="cbday-card-hero">
+                        <div className="cbday-card-avatar">
+                          {b.profile_picture ? (
+                            <img src={b.profile_picture} alt={b.fullName} referrerPolicy="no-referrer" />
+                          ) : (
+                            <span className="cbday-card-initials">{b.firstname?.[0]}{b.lastname?.[0]}</span>
+                          )}
+                          <div className="cbday-card-avatar-ring"></div>
+                        </div>
+                        <div className="cbday-card-celebration-text">
+                          <span className="cbday-card-label">🎂 Happy Birthday!</span>
+                          <h2 className="cbday-card-name">{b.fullName}</h2>
+                          <span className="cbday-card-role"><i className="fas fa-church"></i> {b.ministry || 'Church Member'}</span>
+                        </div>
+                      </div>
+
+                      {/* Bible verse card */}
+                      <div className="cbday-verse-card">
+                        <div className="cbday-verse-icon">📖</div>
+                        <blockquote className="cbday-verse-text">&ldquo;{verse.verse}&rdquo;</blockquote>
+                        <cite className="cbday-verse-ref">— {verse.ref}</cite>
+                      </div>
+
+                      {/* Reactions footer */}
+                      <div className="cbday-card-footer">
+                        <button className={`cbday-like-btn${liked ? ' liked' : ''}${likeAnim ? ' animating' : ''}`} onClick={() => handleCommunityBdayLike(b.fullName)}>
+                          <i className={`${liked ? 'fas' : 'far'} fa-heart`}></i>
+                          <span>{likeCount}</span>
+                        </button>
+                        <button className={`cbday-comment-btn${showComms ? ' active' : ''}`} onClick={() => setShowCommunityBdayComments(prev => ({ ...prev, [b.fullName]: !prev[b.fullName] }))}>
+                          <i className="far fa-comment"></i>
+                          <span>{comments.length}</span>
+                        </button>
+                        <span className="cbday-card-date"><i className="fas fa-calendar-day"></i> {new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}</span>
+                      </div>
+
+                      {/* Comments section */}
+                      <div className={`cbday-comments-section${showComms ? ' open' : ''}`}>
+                        <div className="cbday-comments-inner">
+                          {comments.length === 0 && <p className="cbday-no-comments">Be the first to wish {b.firstname} a blessed birthday! 🎁</p>}
+                          {comments.map((c) => (
+                            <div key={c.id} className="cbday-comment">
+                              <div className="cbday-comment-avatar">
+                                {c.picture ? <img src={c.picture} alt="" referrerPolicy="no-referrer" /> : <span>{c.author?.split(' ').map(n => n[0]).join('').slice(0,2)}</span>}
+                              </div>
+                              <div className="cbday-comment-body">
+                                <strong>{c.author}</strong>
+                                <p>{c.content}</p>
+                                <span className="cbday-comment-time">{formatDateTime(c.time)}</span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                        <div className="cbday-comment-form">
+                          <input
+                            type="text"
+                            className="cbday-comment-input"
+                            placeholder={`Wish ${b.firstname} a happy birthday...`}
+                            value={communityBdayCommentInput[b.fullName] || ''}
+                            onChange={(e) => setCommunityBdayCommentInput(prev => ({ ...prev, [b.fullName]: e.target.value }))}
+                            onKeyDown={(e) => { if (e.key === 'Enter') handleCommunityBdayComment(b.fullName); }}
+                          />
+                          <button className="cbday-comment-send" onClick={() => handleCommunityBdayComment(b.fullName)}>
+                            <i className="fas fa-paper-plane"></i>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
 
             {/* === FACEBOOK LIVE STREAM VIEWER === */}
             {liveStreams.filter(s => s.is_live && s.is_active).length > 0 && (

@@ -1,5 +1,6 @@
 'use client';
 import { useState, useEffect, useCallback } from 'react';
+import { supabase } from '@/lib/supabase';
 import './live.css';
 
 const SITE_URL = 'https://jsci.vercel.app';
@@ -57,9 +58,26 @@ export default function LivePage() {
 
   useEffect(() => {
     loadStreams();
-    // Auto-refresh every 30s
+    // Auto-refresh every 30s as fallback
     const interval = setInterval(loadStreams, 30000);
-    return () => clearInterval(interval);
+
+    // Realtime subscription — instant update when admin posts/updates/hides streams
+    let channel;
+    if (supabase) {
+      channel = supabase
+        .channel('live-page-streams')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'live_streams' }, () => {
+          loadStreams();
+        })
+        .subscribe();
+    }
+
+    return () => {
+      clearInterval(interval);
+      if (channel && supabase) {
+        supabase.removeChannel(channel);
+      }
+    };
   }, [loadStreams]);
 
   // Format date

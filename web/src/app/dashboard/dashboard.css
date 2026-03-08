@@ -19416,3 +19416,1413 @@ body.dark-mode .live-share-copy-input {
     font-size: 0.82rem;
   }
 }
+
+/* ============================================
+   BIRTHDAY GREETINGS — Full Feature CSS
+   ============================================ */
+
+/* Highlighted celebrant name */
+.bday-greet-celebrant-name {
+  background: linear-gradient(135deg, #d63384, #ff6b9d);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  font-size: 1rem !important;
+  font-weight: 800 !important;
+  letter-spacing: 0.3px;
+  position: relative;
+  display: inline-block;
+}
+.bday-greet-celebrant-name::after {
+  content: '🎉';
+  -webkit-text-fill-color: initial;
+  margin-left: 4px;
+  font-size: 0.85rem;
+  animation: bdayNameBounce 1.5s ease infinite;
+}
+@keyframes bdayNameBounce {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-3px); }
+}
+
+/* Celebrant card wrapper */
+.bday-greet-celebrant-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+/* Greeting count button */
+.bday-greet-count-btn {
+  background: linear-gradient(135deg, #fff0f6, #ffe0ec);
+  border: 1px solid rgba(214,51,132,0.15);
+  color: #d63384;
+  font-family: 'Poppins', sans-serif;
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 6px 14px;
+  border-radius: 20px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.2s;
+  width: fit-content;
+}
+.bday-greet-count-btn:hover {
+  background: linear-gradient(135deg, #ffe0ec, #ffd0e0);
+  transform: translateY(-1px);
+  box-shadow: 0 3px 10px rgba(214,51,132,0.15);
+}
+
+/* Read my greetings button */
+.bday-greet-read-mine-btn {
+  background: linear-gradient(135deg, #d63384, #e91e8c);
+  color: #fff;
+  font-family: 'Poppins', sans-serif;
+  font-size: 0.85rem;
+  font-weight: 600;
+  padding: 10px 22px;
+  border-radius: 25px;
+  border: none;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  transition: all 0.3s;
+  box-shadow: 0 4px 15px rgba(214,51,132,0.3);
+  animation: bdayGiftPulse 2s ease infinite;
+}
+.bday-greet-read-mine-btn:hover {
+  transform: translateY(-2px) scale(1.03);
+  box-shadow: 0 6px 25px rgba(214,51,132,0.4);
+}
+@keyframes bdayGiftPulse {
+  0%, 100% { box-shadow: 0 4px 15px rgba(214,51,132,0.3); }
+  50% { box-shadow: 0 4px 25px rgba(214,51,132,0.5); }
+}
+
+/* Quick send greetings button (home section) */
+.bday-greet-quick-btn {
+  background: none;
+  border: 1px solid rgba(214,51,132,0.3);
+  color: #d63384;
+  font-family: 'Poppins', sans-serif;
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 14px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+  transition: all 0.2s;
+}
+.bday-greet-quick-btn:hover {
+  background: #d63384;
+  color: #fff;
+}
+
+/* ---- GREETING FORM WITH GIFT ANIMATION ---- */
+.bday-greet-form-wrapper {
+  position: relative;
+  border-radius: 16px;
+  padding: 14px;
+  background: linear-gradient(135deg, #fff8fc, #fff0f6);
+  border: 1px solid rgba(214,51,132,0.1);
+  overflow: hidden;
+}
+
+.bday-greet-gift-box {
+  position: absolute;
+  top: 50%;
+  right: 20px;
+  transform: translateY(-50%) scale(0);
+  font-size: 2.5rem;
+  z-index: 5;
+  opacity: 0;
+  transition: all 0.6s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.bday-greet-gift-lid {
+  display: inline-block;
+  transition: transform 0.4s ease;
+}
+.bday-greet-gift-sparkle {
+  position: absolute;
+  top: -10px;
+  right: -10px;
+  font-size: 1.2rem;
+  animation: bdaySparkle 0.8s ease infinite;
+}
+@keyframes bdaySparkle {
+  0%, 100% { opacity: 1; transform: scale(1) rotate(0deg); }
+  50% { opacity: 0.6; transform: scale(1.3) rotate(15deg); }
+}
+
+/* Emoji picker */
+.bday-greet-emoji-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+.bday-greet-emoji-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  border: 1.5px solid transparent;
+  background: rgba(255,255,255,0.7);
+  cursor: pointer;
+  font-size: 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+}
+.bday-greet-emoji-btn:hover {
+  background: #fff;
+  transform: scale(1.15);
+}
+.bday-greet-emoji-btn.active {
+  border-color: #d63384;
+  background: #fff0f6;
+  transform: scale(1.15);
+  box-shadow: 0 2px 8px rgba(214,51,132,0.2);
+}
+
+/* Input row */
+.bday-greet-input-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.bday-greet-input {
+  flex: 1;
+  padding: 10px 14px;
+  border-radius: 25px;
+  border: 1.5px solid rgba(214,51,132,0.2);
+  background: #fff;
+  font-family: 'Poppins', sans-serif;
+  font-size: 0.85rem;
+  color: #1a1a2e;
+  outline: none;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.bday-greet-input:focus {
+  border-color: #d63384;
+  box-shadow: 0 0 0 3px rgba(214,51,132,0.1);
+}
+.bday-greet-input::placeholder { color: #c5a0b3; }
+
+.bday-greet-send-btn {
+  background: linear-gradient(135deg, #d63384, #e91e8c);
+  color: #fff;
+  border: none;
+  padding: 10px 18px;
+  border-radius: 25px;
+  font-family: 'Poppins', sans-serif;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+.bday-greet-send-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 15px rgba(214,51,132,0.35);
+}
+.bday-greet-send-btn:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+/* ---- SEND ANIMATION: message flies into gift ---- */
+.bday-greet-message-bubble {
+  transition: all 0.8s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  position: relative;
+  z-index: 2;
+}
+
+/* Phase 1: Sending — message shrinks and flies to gift */
+.bday-anim-sending .bday-greet-message-bubble {
+  animation: bdayMsgToGift 1.2s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
+}
+.bday-anim-sending .bday-greet-gift-box {
+  opacity: 1;
+  transform: translateY(-50%) scale(1);
+  animation: bdayGiftAppear 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+/* Phase 2: Delivered — gift shakes, sparkle shows */
+.bday-anim-delivered .bday-greet-gift-box {
+  opacity: 1;
+  transform: translateY(-50%) scale(1);
+  animation: bdayGiftDelivered 0.8s ease forwards;
+}
+.bday-anim-delivered .bday-greet-gift-lid {
+  animation: bdayLidBounce 0.6s ease;
+}
+.bday-anim-delivered .bday-greet-message-bubble {
+  opacity: 0;
+  transform: scale(0.3) translateX(100px);
+}
+
+@keyframes bdayMsgToGift {
+  0% { opacity: 1; transform: scale(1) translateX(0); }
+  50% { opacity: 0.8; transform: scale(0.6) translateX(30px) translateY(-10px); }
+  80% { opacity: 0.3; transform: scale(0.2) translateX(80px) translateY(-5px); }
+  100% { opacity: 0; transform: scale(0) translateX(100px); }
+}
+
+@keyframes bdayGiftAppear {
+  0% { transform: translateY(-50%) scale(0) rotate(-20deg); }
+  60% { transform: translateY(-50%) scale(1.2) rotate(5deg); }
+  100% { transform: translateY(-50%) scale(1) rotate(0deg); }
+}
+
+@keyframes bdayGiftDelivered {
+  0% { transform: translateY(-50%) scale(1); }
+  15% { transform: translateY(-50%) scale(1.15) rotate(-5deg); }
+  30% { transform: translateY(-50%) scale(1.15) rotate(5deg); }
+  45% { transform: translateY(-50%) scale(1.1) rotate(-3deg); }
+  60% { transform: translateY(-50%) scale(1.1) rotate(3deg); }
+  100% { transform: translateY(-50%) scale(1) rotate(0deg); }
+}
+
+@keyframes bdayLidBounce {
+  0% { transform: translateY(0) rotate(0); }
+  30% { transform: translateY(-12px) rotate(-15deg); }
+  60% { transform: translateY(-5px) rotate(5deg); }
+  100% { transform: translateY(0) rotate(0); }
+}
+
+/* ---- GREETINGS LIST ---- */
+.bday-greet-list {
+  background: #fff;
+  border-radius: 14px;
+  padding: 14px;
+  border: 1px solid rgba(214,51,132,0.08);
+  box-shadow: 0 2px 10px rgba(0,0,0,0.04);
+}
+.bday-greet-list-title {
+  font-family: 'Poppins', sans-serif;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #d63384;
+  margin: 0 0 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.bday-greet-list-title strong {
+  color: #1a1a2e;
+}
+
+.bday-greet-item {
+  display: flex;
+  gap: 10px;
+  padding: 10px;
+  border-radius: 12px;
+  margin-bottom: 6px;
+  background: linear-gradient(135deg, #fefafc, #fff5f9);
+  animation: bdayGreetSlideIn 0.4s ease forwards;
+  opacity: 0;
+  transform: translateY(10px);
+}
+@keyframes bdayGreetSlideIn {
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.bday-greet-item-avatar img,
+.bday-greet-item-initials {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+.bday-greet-item-initials {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Poppins', sans-serif;
+  font-weight: 700;
+  font-size: 0.7rem;
+  color: #fff;
+  background: linear-gradient(135deg, #d63384, #6f42c1);
+  text-transform: uppercase;
+}
+
+.bday-greet-item-body {
+  flex: 1;
+  min-width: 0;
+}
+.bday-greet-item-sender {
+  font-family: 'Poppins', sans-serif;
+  font-weight: 700;
+  font-size: 0.8rem;
+  color: #1a1a2e;
+}
+.bday-greet-item-msg {
+  font-size: 0.82rem;
+  color: #444;
+  margin: 2px 0 0;
+  line-height: 1.4;
+}
+.bday-greet-item-time {
+  font-size: 0.68rem;
+  color: #adb5bd;
+}
+
+/* ---- CELEBRANT MODAL (Read My Greetings) ---- */
+.bday-greet-modal-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.55);
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  animation: bdayOverlayFade 0.3s ease;
+}
+@keyframes bdayOverlayFade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.bday-greet-modal {
+  background: #fff;
+  border-radius: 24px;
+  width: 100%;
+  max-width: 520px;
+  max-height: 85vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.2);
+  animation: bdayModalSlideUp 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+  position: relative;
+}
+@keyframes bdayModalSlideUp {
+  from { opacity: 0; transform: translateY(40px) scale(0.95); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.bday-greet-modal-close {
+  position: absolute;
+  top: 14px; right: 14px;
+  background: rgba(0,0,0,0.08);
+  border: none;
+  width: 34px; height: 34px;
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #666;
+  font-size: 0.9rem;
+  z-index: 2;
+  transition: all 0.2s;
+}
+.bday-greet-modal-close:hover {
+  background: rgba(0,0,0,0.15);
+  color: #333;
+}
+
+.bday-greet-modal-header {
+  background: linear-gradient(135deg, #d63384, #e91e8c, #ff6b9d);
+  color: #fff;
+  padding: 30px 24px 24px;
+  text-align: center;
+}
+.bday-greet-modal-gift-anim {
+  font-size: 3rem;
+  animation: bdayModalGiftBounce 1.5s ease infinite;
+  margin-bottom: 10px;
+}
+@keyframes bdayModalGiftBounce {
+  0%, 100% { transform: translateY(0) rotate(0); }
+  25% { transform: translateY(-10px) rotate(-5deg); }
+  50% { transform: translateY(0) rotate(0); }
+  75% { transform: translateY(-6px) rotate(5deg); }
+}
+.bday-greet-modal-header h3 {
+  font-family: 'Poppins', sans-serif;
+  font-weight: 800;
+  font-size: 1.3rem;
+  margin: 0 0 6px;
+}
+.bday-greet-modal-header p {
+  font-size: 0.88rem;
+  opacity: 0.9;
+  margin: 0;
+}
+
+.bday-greet-modal-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+}
+
+.bday-greet-modal-empty {
+  text-align: center;
+  padding: 40px 20px;
+  color: #adb5bd;
+}
+.bday-greet-modal-empty span {
+  font-size: 3rem;
+  display: block;
+  margin-bottom: 10px;
+}
+.bday-greet-modal-empty p {
+  font-size: 0.9rem;
+}
+
+.bday-greet-modal-item {
+  display: flex;
+  gap: 12px;
+  padding: 14px;
+  border-radius: 16px;
+  margin-bottom: 8px;
+  background: linear-gradient(135deg, #fff5f9, #fff0f6);
+  border: 1px solid rgba(214,51,132,0.06);
+  animation: bdayModalItemPop 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+  opacity: 0;
+  transform: scale(0.8) translateY(15px);
+}
+@keyframes bdayModalItemPop {
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+.bday-greet-modal-item-avatar img,
+.bday-greet-modal-item-initials {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+.bday-greet-modal-item-initials {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Poppins', sans-serif;
+  font-weight: 700;
+  font-size: 0.8rem;
+  color: #fff;
+  background: linear-gradient(135deg, #d63384, #6f42c1);
+  text-transform: uppercase;
+}
+
+.bday-greet-modal-item-body {
+  flex: 1;
+  min-width: 0;
+}
+.bday-greet-modal-item-sender {
+  font-family: 'Poppins', sans-serif;
+  font-weight: 700;
+  font-size: 0.88rem;
+  color: #1a1a2e;
+  display: block;
+}
+.bday-greet-modal-item-msg {
+  font-size: 0.88rem;
+  color: #444;
+  margin: 4px 0 0;
+  line-height: 1.5;
+}
+.bday-greet-modal-item-time {
+  font-size: 0.7rem;
+  color: #adb5bd;
+  margin-top: 4px;
+  display: block;
+}
+
+/* ---- DARK MODE ---- */
+body.dark-mode .bday-greet-celebrant-name {
+  background: linear-gradient(135deg, #ff6b9d, #ff9ec5);
+  -webkit-background-clip: text;
+  background-clip: text;
+}
+body.dark-mode .bday-greet-form-wrapper {
+  background: linear-gradient(135deg, rgba(214,51,132,0.08), rgba(214,51,132,0.04));
+  border-color: rgba(214,51,132,0.15);
+}
+body.dark-mode .bday-greet-input {
+  background: var(--bg-card, #1e1e2e);
+  color: #e0e0e0;
+  border-color: rgba(214,51,132,0.25);
+}
+body.dark-mode .bday-greet-input::placeholder { color: #777; }
+body.dark-mode .bday-greet-emoji-btn {
+  background: rgba(255,255,255,0.05);
+}
+body.dark-mode .bday-greet-emoji-btn.active {
+  background: rgba(214,51,132,0.15);
+}
+body.dark-mode .bday-greet-list {
+  background: var(--bg-card, #1e1e2e);
+  border-color: rgba(214,51,132,0.1);
+}
+body.dark-mode .bday-greet-item {
+  background: linear-gradient(135deg, rgba(214,51,132,0.06), rgba(214,51,132,0.03));
+}
+body.dark-mode .bday-greet-item-sender,
+body.dark-mode .bday-greet-list-title strong {
+  color: #e0e0e0;
+}
+body.dark-mode .bday-greet-item-msg {
+  color: #bbb;
+}
+body.dark-mode .bday-greet-count-btn {
+  background: linear-gradient(135deg, rgba(214,51,132,0.12), rgba(214,51,132,0.06));
+  border-color: rgba(214,51,132,0.2);
+}
+body.dark-mode .bday-greet-modal {
+  background: var(--bg-card, #1e1e2e);
+}
+body.dark-mode .bday-greet-modal-close {
+  background: rgba(255,255,255,0.1);
+  color: #ccc;
+}
+body.dark-mode .bday-greet-modal-item {
+  background: linear-gradient(135deg, rgba(214,51,132,0.08), rgba(214,51,132,0.04));
+  border-color: rgba(214,51,132,0.1);
+}
+body.dark-mode .bday-greet-modal-item-sender {
+  color: #e0e0e0;
+}
+body.dark-mode .bday-greet-modal-item-msg {
+  color: #bbb;
+}
+body.dark-mode .bday-greet-modal-empty {
+  color: #666;
+}
+body.dark-mode .bday-greet-quick-btn {
+  border-color: rgba(214,51,132,0.35);
+  color: #ff6b9d;
+}
+body.dark-mode .bday-greet-quick-btn:hover {
+  background: #d63384;
+  color: #fff;
+}
+
+/* ---- RESPONSIVE ---- */
+@media (max-width: 600px) {
+  .bday-greet-emoji-picker {
+    gap: 3px;
+  }
+  .bday-greet-emoji-btn {
+    width: 28px;
+    height: 28px;
+    font-size: 0.85rem;
+  }
+  .bday-greet-input-row {
+    flex-direction: column;
+  }
+  .bday-greet-send-btn {
+    width: 100%;
+    justify-content: center;
+  }
+  .bday-greet-modal {
+    max-width: 100%;
+    border-radius: 20px;
+  }
+  .bday-greet-modal-header h3 {
+    font-size: 1.1rem;
+  }
+}
+
+/* ===========================================
+   ANNOUNCEMENT BIRTHDAY CARDS - HERO DESIGN
+   =========================================== */
+.bday-announce-section {
+  background: linear-gradient(135deg, #fff7ed 0%, #fef3c7 50%, #fce7f3 100%);
+  border-radius: 20px;
+  padding: 28px 24px;
+  margin-bottom: 24px;
+  border: 1px solid rgba(251, 191, 36, 0.25);
+  position: relative;
+  overflow: hidden;
+}
+.bday-announce-section::before {
+  content: '';
+  position: absolute;
+  top: -40px;
+  right: -40px;
+  width: 120px;
+  height: 120px;
+  background: radial-gradient(circle, rgba(251, 191, 36, 0.15) 0%, transparent 70%);
+  border-radius: 50%;
+}
+.bday-announce-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 24px;
+}
+.bday-announce-header-icon {
+  font-size: 2.2rem;
+  line-height: 1;
+}
+.bday-announce-header-title {
+  font-size: 1.35rem;
+  font-weight: 800;
+  color: #92400e;
+  margin: 0;
+}
+.bday-announce-header-sub {
+  font-size: 0.88rem;
+  color: #b45309;
+  margin: 2px 0 0;
+  opacity: 0.85;
+}
+
+/* Individual celebrant card */
+.bday-announce-card {
+  background: #fff;
+  border-radius: 18px;
+  overflow: hidden;
+  margin-bottom: 20px;
+  box-shadow: 0 4px 24px rgba(251, 191, 36, 0.12), 0 1px 4px rgba(0,0,0,0.04);
+  border: 1px solid rgba(251, 191, 36, 0.18);
+  transition: transform 0.3s, box-shadow 0.3s;
+}
+.bday-announce-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 8px 32px rgba(251, 191, 36, 0.2), 0 2px 8px rgba(0,0,0,0.06);
+}
+
+/* Hero banner */
+.bday-announce-card-hero {
+  background: linear-gradient(135deg, #f59e0b 0%, #ec4899 50%, #8b5cf6 100%);
+  padding: 36px 24px 28px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  position: relative;
+  overflow: hidden;
+}
+.bday-announce-card-hero::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='60' height='60'%3E%3Ccircle cx='30' cy='30' r='1.5' fill='rgba(255,255,255,0.15)'/%3E%3C/svg%3E") repeat;
+}
+.bday-announce-card-confetti-left,
+.bday-announce-card-confetti-right {
+  position: absolute;
+  top: 12px;
+  font-size: 2rem;
+  animation: bdayConfettiBounce 2s ease-in-out infinite;
+  z-index: 1;
+}
+.bday-announce-card-confetti-left { left: 16px; }
+.bday-announce-card-confetti-right { right: 16px; animation-delay: 0.5s; }
+
+@keyframes bdayConfettiBounce {
+  0%, 100% { transform: translateY(0) rotate(0deg); }
+  50% { transform: translateY(-8px) rotate(10deg); }
+}
+
+/* Big avatar */
+.bday-announce-card-avatar-big {
+  width: 120px;
+  height: 120px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.25);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  z-index: 1;
+  margin-bottom: 14px;
+  border: 4px solid rgba(255,255,255,0.5);
+  box-shadow: 0 8px 32px rgba(0,0,0,0.18);
+}
+.bday-announce-card-avatar-big img {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  object-fit: cover;
+}
+.bday-announce-card-initials {
+  font-size: 2.6rem;
+  font-weight: 800;
+  color: #fff;
+  text-transform: uppercase;
+}
+.bday-announce-card-cake {
+  position: absolute;
+  bottom: -4px;
+  right: -4px;
+  font-size: 1.8rem;
+  background: #fff;
+  border-radius: 50%;
+  width: 38px;
+  height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+  z-index: 2;
+}
+.bday-announce-card-name {
+  font-size: 1.6rem;
+  font-weight: 800;
+  color: #fff;
+  margin: 0 0 6px;
+  text-shadow: 0 2px 8px rgba(0,0,0,0.2);
+  z-index: 1;
+}
+.bday-announce-card-role {
+  font-size: 0.88rem;
+  color: rgba(255,255,255,0.9);
+  background: rgba(255,255,255,0.18);
+  padding: 4px 14px;
+  border-radius: 20px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+  z-index: 1;
+}
+.bday-announce-card-date {
+  font-size: 0.82rem;
+  color: rgba(255,255,255,0.8);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 4px;
+  z-index: 1;
+}
+
+/* Body with private message */
+.bday-announce-card-body {
+  padding: 20px 24px 24px;
+}
+.bday-greet-form-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #9333ea;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 12px;
+  opacity: 0.85;
+}
+.bday-greet-count-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: linear-gradient(135deg, #f3e8ff 0%, #fce7f3 100%);
+  color: #7c3aed;
+  border: 1px solid rgba(124, 58, 237, 0.15);
+  padding: 10px 18px;
+  border-radius: 12px;
+  font-size: 0.92rem;
+  font-weight: 600;
+  cursor: pointer;
+  width: 100%;
+  justify-content: center;
+  margin-bottom: 16px;
+  transition: all 0.2s;
+}
+.bday-greet-count-btn:hover {
+  background: linear-gradient(135deg, #ede9fe 0%, #fce7f3 100%);
+  border-color: rgba(124, 58, 237, 0.3);
+  transform: translateY(-1px);
+}
+
+/* ===========================================
+   COMMUNITY BIRTHDAY CARD - 24HR CELEBRATION
+   =========================================== */
+.cbday-section {
+  margin-bottom: 24px;
+}
+.cbday-section-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 20px;
+  padding: 16px 20px;
+  background: linear-gradient(135deg, #fef3c7 0%, #fce7f3 100%);
+  border-radius: 16px;
+  border: 1px solid rgba(251, 191, 36, 0.2);
+  position: relative;
+}
+.cbday-section-icon {
+  font-size: 2rem;
+  line-height: 1;
+}
+.cbday-section-title {
+  font-size: 1.2rem;
+  font-weight: 800;
+  color: #92400e;
+  margin: 0;
+}
+.cbday-section-sub {
+  font-size: 0.82rem;
+  color: #b45309;
+  margin: 2px 0 0;
+  opacity: 0.85;
+}
+.cbday-24h-badge {
+  margin-left: auto;
+  background: rgba(239, 68, 68, 0.1);
+  color: #dc2626;
+  font-size: 0.75rem;
+  font-weight: 700;
+  padding: 5px 12px;
+  border-radius: 20px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid rgba(239, 68, 68, 0.15);
+  white-space: nowrap;
+}
+
+/* Community Birthday Card */
+.cbday-card {
+  background: #fff;
+  border-radius: 20px;
+  overflow: hidden;
+  margin-bottom: 20px;
+  box-shadow: 0 4px 24px rgba(251, 191, 36, 0.1), 0 1px 4px rgba(0,0,0,0.04);
+  border: 1px solid rgba(251, 191, 36, 0.15);
+  transition: transform 0.3s, box-shadow 0.3s;
+  position: relative;
+}
+.cbday-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 36px rgba(251, 191, 36, 0.18), 0 2px 8px rgba(0,0,0,0.05);
+}
+
+/* Confetti decoration strip */
+.cbday-card-confetti {
+  display: flex;
+  justify-content: space-around;
+  padding: 10px 20px 0;
+  font-size: 1.3rem;
+  animation: cbdayConfettiFloat 3s ease-in-out infinite;
+}
+.cbday-card-confetti span {
+  display: inline-block;
+}
+.cbday-card-confetti span:nth-child(1) { animation: cbdayFloat1 2.5s ease-in-out infinite; }
+.cbday-card-confetti span:nth-child(2) { animation: cbdayFloat2 3s ease-in-out infinite; }
+.cbday-card-confetti span:nth-child(3) { animation: cbdayFloat1 2.8s ease-in-out infinite 0.3s; }
+.cbday-card-confetti span:nth-child(4) { animation: cbdayFloat2 2.6s ease-in-out infinite 0.5s; }
+.cbday-card-confetti span:nth-child(5) { animation: cbdayFloat1 3.2s ease-in-out infinite 0.2s; }
+.cbday-card-confetti span:nth-child(6) { animation: cbdayFloat2 2.4s ease-in-out infinite 0.7s; }
+
+@keyframes cbdayFloat1 {
+  0%, 100% { transform: translateY(0) rotate(0deg); }
+  50% { transform: translateY(-6px) rotate(8deg); }
+}
+@keyframes cbdayFloat2 {
+  0%, 100% { transform: translateY(0) rotate(0deg); }
+  50% { transform: translateY(-8px) rotate(-6deg); }
+}
+
+/* Hero section */
+.cbday-card-hero {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 24px 28px 20px;
+  background: linear-gradient(135deg, rgba(251, 191, 36, 0.06) 0%, rgba(236, 72, 153, 0.06) 100%);
+}
+.cbday-card-avatar {
+  width: 100px;
+  height: 100px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.cbday-card-avatar img {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 3px solid #fff;
+  box-shadow: 0 4px 16px rgba(251, 191, 36, 0.25);
+  position: relative;
+  z-index: 1;
+}
+.cbday-card-avatar-ring {
+  position: absolute;
+  top: -4px; left: -4px; right: -4px; bottom: -4px;
+  border-radius: 50%;
+  border: 3px solid transparent;
+  background: linear-gradient(135deg, #f59e0b, #ec4899, #8b5cf6, #f59e0b) border-box;
+  -webkit-mask: linear-gradient(#fff 0 0) padding-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: destination-out;
+  mask-composite: exclude;
+  animation: cbdayRingSpin 4s linear infinite;
+}
+@keyframes cbdayRingSpin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+.cbday-card-initials {
+  font-size: 2.2rem;
+  font-weight: 800;
+  color: #fff;
+  text-transform: uppercase;
+  background: linear-gradient(135deg, #f59e0b, #ec4899);
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 3px solid #fff;
+  box-shadow: 0 4px 16px rgba(251, 191, 36, 0.25);
+  position: relative;
+  z-index: 1;
+}
+.cbday-card-celebration-text {
+  flex: 1;
+}
+.cbday-card-label {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #d97706;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.cbday-card-name {
+  font-size: 1.55rem;
+  font-weight: 800;
+  color: #1e293b;
+  margin: 4px 0 6px;
+  line-height: 1.2;
+}
+.cbday-card-role {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85rem;
+  color: #64748b;
+  background: rgba(100, 116, 139, 0.08);
+  padding: 4px 12px;
+  border-radius: 16px;
+}
+
+/* Bible verse card */
+.cbday-verse-card {
+  margin: 0 24px 20px;
+  padding: 20px 22px;
+  background: linear-gradient(135deg, #f0fdf4 0%, #ecfdf5 50%, #f0f9ff 100%);
+  border-radius: 16px;
+  border-left: 4px solid #10b981;
+  position: relative;
+}
+.cbday-verse-icon {
+  position: absolute;
+  top: 14px;
+  right: 16px;
+  font-size: 1.3rem;
+  opacity: 0.6;
+}
+.cbday-verse-text {
+  font-size: 1rem;
+  font-style: italic;
+  color: #065f46;
+  line-height: 1.65;
+  margin: 0 0 8px;
+  padding-right: 30px;
+}
+.cbday-verse-ref {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #047857;
+  font-style: normal;
+  display: block;
+}
+
+/* Card footer - reactions */
+.cbday-card-footer {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 12px 24px;
+  border-top: 1px solid rgba(0,0,0,0.06);
+}
+.cbday-like-btn,
+.cbday-comment-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  border-radius: 10px;
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: #64748b;
+  transition: all 0.2s;
+}
+.cbday-like-btn:hover {
+  background: rgba(239, 68, 68, 0.08);
+  color: #ef4444;
+}
+.cbday-like-btn.liked {
+  color: #ef4444;
+}
+.cbday-like-btn.liked i {
+  color: #ef4444;
+}
+.cbday-like-btn.animating i {
+  animation: cbdayHeartPop 0.5s ease-out;
+}
+@keyframes cbdayHeartPop {
+  0% { transform: scale(1); }
+  30% { transform: scale(1.5); }
+  60% { transform: scale(0.9); }
+  100% { transform: scale(1); }
+}
+.cbday-comment-btn:hover {
+  background: rgba(59, 130, 246, 0.08);
+  color: #3b82f6;
+}
+.cbday-comment-btn.active {
+  color: #3b82f6;
+}
+.cbday-card-date {
+  margin-left: auto;
+  font-size: 0.78rem;
+  color: #94a3b8;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+/* Comments section */
+.cbday-comments-section {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.4s ease, padding 0.3s ease;
+  border-top: 1px solid transparent;
+}
+.cbday-comments-section.open {
+  max-height: 600px;
+  border-top-color: rgba(0,0,0,0.06);
+  padding: 0 0 4px;
+}
+.cbday-comments-inner {
+  padding: 14px 24px 8px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+.cbday-no-comments {
+  font-size: 0.88rem;
+  color: #94a3b8;
+  text-align: center;
+  padding: 12px 0;
+}
+.cbday-comment {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 12px;
+  animation: cbdayCommentSlide 0.3s ease;
+}
+@keyframes cbdayCommentSlide {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.cbday-comment-avatar {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  overflow: hidden;
+  flex-shrink: 0;
+  background: linear-gradient(135deg, #f59e0b, #ec4899);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.cbday-comment-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.cbday-comment-avatar span {
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: #fff;
+  text-transform: uppercase;
+}
+.cbday-comment-body {
+  flex: 1;
+  background: #f8fafc;
+  padding: 10px 14px;
+  border-radius: 14px;
+}
+.cbday-comment-body strong {
+  font-size: 0.82rem;
+  color: #1e293b;
+  display: block;
+  margin-bottom: 2px;
+}
+.cbday-comment-body p {
+  font-size: 0.88rem;
+  color: #475569;
+  margin: 0;
+  line-height: 1.45;
+}
+.cbday-comment-time {
+  font-size: 0.72rem;
+  color: #94a3b8;
+  display: block;
+  margin-top: 4px;
+}
+
+/* Comment form */
+.cbday-comment-form {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 24px 14px;
+  border-top: 1px solid rgba(0,0,0,0.04);
+}
+.cbday-comment-input {
+  flex: 1;
+  padding: 10px 16px;
+  border: 1px solid #e2e8f0;
+  border-radius: 24px;
+  font-size: 0.88rem;
+  background: #f8fafc;
+  outline: none;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.cbday-comment-input:focus {
+  border-color: #f59e0b;
+  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.1);
+}
+.cbday-comment-input::placeholder {
+  color: #94a3b8;
+}
+.cbday-comment-send {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #f59e0b, #ec4899);
+  color: #fff;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.9rem;
+  flex-shrink: 0;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+.cbday-comment-send:hover {
+  transform: scale(1.08);
+  box-shadow: 0 4px 12px rgba(245, 158, 11, 0.3);
+}
+
+/* ===========================================
+   DARK MODE - Announcement Birthday
+   =========================================== */
+body.dark-mode .bday-announce-section {
+  background: linear-gradient(135deg, #1c1917 0%, #292524 50%, #1e1b2e 100%);
+  border-color: rgba(251, 191, 36, 0.15);
+}
+body.dark-mode .bday-announce-header-title {
+  color: #fbbf24;
+}
+body.dark-mode .bday-announce-header-sub {
+  color: #d97706;
+}
+body.dark-mode .bday-announce-card {
+  background: #1e1b2e;
+  border-color: rgba(251, 191, 36, 0.12);
+  box-shadow: 0 4px 24px rgba(0,0,0,0.3);
+}
+body.dark-mode .bday-announce-card-body {
+  background: #1e1b2e;
+}
+body.dark-mode .bday-greet-form-label {
+  color: #c084fc;
+}
+body.dark-mode .bday-greet-count-btn {
+  background: linear-gradient(135deg, rgba(139, 92, 246, 0.15) 0%, rgba(236, 72, 153, 0.12) 100%);
+  color: #c084fc;
+  border-color: rgba(139, 92, 246, 0.2);
+}
+
+/* ===========================================
+   DARK MODE - Community Birthday
+   =========================================== */
+body.dark-mode .cbday-section-header {
+  background: linear-gradient(135deg, #1c1917 0%, #1e1b2e 100%);
+  border-color: rgba(251, 191, 36, 0.15);
+}
+body.dark-mode .cbday-section-title {
+  color: #fbbf24;
+}
+body.dark-mode .cbday-section-sub {
+  color: #d97706;
+}
+body.dark-mode .cbday-card {
+  background: #1e293b;
+  border-color: rgba(251, 191, 36, 0.12);
+  box-shadow: 0 4px 24px rgba(0,0,0,0.3);
+}
+body.dark-mode .cbday-card-hero {
+  background: linear-gradient(135deg, rgba(251, 191, 36, 0.08) 0%, rgba(236, 72, 153, 0.08) 100%);
+}
+body.dark-mode .cbday-card-name {
+  color: #f1f5f9;
+}
+body.dark-mode .cbday-card-role {
+  color: #94a3b8;
+  background: rgba(148, 163, 184, 0.1);
+}
+body.dark-mode .cbday-verse-card {
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.08) 0%, rgba(6, 95, 70, 0.08) 100%);
+  border-left-color: #10b981;
+}
+body.dark-mode .cbday-verse-text {
+  color: #6ee7b7;
+}
+body.dark-mode .cbday-verse-ref {
+  color: #34d399;
+}
+body.dark-mode .cbday-card-footer {
+  border-top-color: rgba(255,255,255,0.06);
+}
+body.dark-mode .cbday-like-btn,
+body.dark-mode .cbday-comment-btn {
+  color: #94a3b8;
+}
+body.dark-mode .cbday-like-btn:hover {
+  background: rgba(239, 68, 68, 0.1);
+}
+body.dark-mode .cbday-comment-btn:hover {
+  background: rgba(59, 130, 246, 0.1);
+}
+body.dark-mode .cbday-card-date {
+  color: #64748b;
+}
+body.dark-mode .cbday-comments-section.open {
+  border-top-color: rgba(255,255,255,0.06);
+}
+body.dark-mode .cbday-comment-body {
+  background: rgba(255,255,255,0.05);
+}
+body.dark-mode .cbday-comment-body strong {
+  color: #e2e8f0;
+}
+body.dark-mode .cbday-comment-body p {
+  color: #cbd5e1;
+}
+body.dark-mode .cbday-comment-time {
+  color: #64748b;
+}
+body.dark-mode .cbday-comment-form {
+  border-top-color: rgba(255,255,255,0.04);
+}
+body.dark-mode .cbday-comment-input {
+  background: rgba(255,255,255,0.05);
+  border-color: rgba(255,255,255,0.1);
+  color: #e2e8f0;
+}
+body.dark-mode .cbday-comment-input:focus {
+  border-color: #f59e0b;
+  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.15);
+}
+body.dark-mode .cbday-comment-input::placeholder {
+  color: #64748b;
+}
+body.dark-mode .cbday-no-comments {
+  color: #64748b;
+}
+body.dark-mode .cbday-24h-badge {
+  background: rgba(239, 68, 68, 0.15);
+  color: #f87171;
+  border-color: rgba(239, 68, 68, 0.2);
+}
+
+/* ===========================================
+   RESPONSIVE - Birthday Cards
+   =========================================== */
+@media (max-width: 600px) {
+  .bday-announce-section {
+    padding: 20px 16px;
+    border-radius: 16px;
+  }
+  .bday-announce-card-hero {
+    padding: 28px 16px 22px;
+  }
+  .bday-announce-card-avatar-big {
+    width: 90px;
+    height: 90px;
+  }
+  .bday-announce-card-initials {
+    font-size: 2rem;
+  }
+  .bday-announce-card-name {
+    font-size: 1.3rem;
+  }
+  .bday-announce-card-body {
+    padding: 16px;
+  }
+  .cbday-card-hero {
+    flex-direction: column;
+    text-align: center;
+    padding: 20px 16px 16px;
+  }
+  .cbday-card-avatar {
+    width: 85px;
+    height: 85px;
+  }
+  .cbday-card-name {
+    font-size: 1.3rem;
+  }
+  .cbday-verse-card {
+    margin: 0 16px 16px;
+    padding: 16px;
+  }
+  .cbday-verse-text {
+    font-size: 0.92rem;
+  }
+  .cbday-card-footer {
+    padding: 10px 16px;
+    flex-wrap: wrap;
+  }
+  .cbday-card-date {
+    width: 100%;
+    justify-content: center;
+    margin-top: 6px;
+    margin-left: 0;
+  }
+  .cbday-comments-inner {
+    padding: 12px 16px 8px;
+  }
+  .cbday-comment-form {
+    padding: 10px 16px 12px;
+  }
+  .cbday-section-header {
+    flex-wrap: wrap;
+  }
+  .cbday-24h-badge {
+    margin-left: 0;
+  }
+}

@@ -6,7 +6,7 @@ export async function GET() {
   try {
     const { data: members, error } = await supabase
       .from('users')
-      .select('firstname, lastname, birthdate, ministry, status, profile_picture')
+      .select('id, firstname, lastname, birthdate, ministry, status, profile_picture')
       .not('birthdate', 'is', null);
 
     if (error) {
@@ -14,6 +14,7 @@ export async function GET() {
     }
 
     const formatted = (members || []).map((m) => ({
+      id: m.id,
       fullName: `${m.firstname} ${m.lastname}`,
       firstname: m.firstname,
       lastname: m.lastname,
