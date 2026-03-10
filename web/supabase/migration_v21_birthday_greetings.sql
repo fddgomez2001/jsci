@@ -4,7 +4,7 @@
 -- to celebrants in announcements section
 -- ============================================
 
--- 1. Birthday Greetings table
+-- 1. irthday Greetings table
 CREATE TABLE IF NOT EXISTS birthday_greetings (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   celebrant_user_id UUID NOT NULL,

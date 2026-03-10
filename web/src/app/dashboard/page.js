@@ -473,6 +473,16 @@ export default function DashboardPage() {
   const [viewingProfile, setViewingProfile] = useState(null);
   const [postMenuOpen, setPostMenuOpen] = useState(null);
   const [commentMenuOpen, setCommentMenuOpen] = useState(null);
+  // Community Photo Upload
+  const [postPhotos, setPostPhotos] = useState([]);
+  const [postPhotosPreviews, setPostPhotosPreviews] = useState([]);
+  const [postUploading, setPostUploading] = useState(false);
+  const [editPostPhotos, setEditPostPhotos] = useState([]);
+  const [editPostPhotosPreviews, setEditPostPhotosPreviews] = useState([]);
+  const [editRemoveImageIds, setEditRemoveImageIds] = useState([]);
+  const [photoViewerOpen, setPhotoViewerOpen] = useState(null);
+  const [photoViewerIndex, setPhotoViewerIndex] = useState(0);
+  const [communityImgLoaded, setCommunityImgLoaded] = useState({});
   // Bible Verse Share
   const [showVerseShareModal, setShowVerseShareModal] = useState(false);
   const [verseShareRef, setVerseShareRef] = useState('');
@@ -2876,6 +2886,14 @@ export default function DashboardPage() {
   // -- Community Hub --
   const [likeAnimating, setLikeAnimating] = useState({});
   const [deletingPost, setDeletingPost] = useState(null);
+  // Reactions (heart, fire, praise)
+  const [reactionPickerOpen, setReactionPickerOpen] = useState(null);
+  const [reactionLongPressTimer, setReactionLongPressTimer] = useState(null);
+  const [reactionViewerOpen, setReactionViewerOpen] = useState(null);
+  const [reactionViewerData, setReactionViewerData] = useState([]);
+  const [reactionViewerCounts, setReactionViewerCounts] = useState({});
+  const [reactionViewerFilter, setReactionViewerFilter] = useState('all');
+  const [reactionViewerLoading, setReactionViewerLoading] = useState(false);
 
   // ============================================
   // BIBLE VERSE SHARE FOR COMMUNITY
@@ -2978,27 +2996,129 @@ export default function DashboardPage() {
     });
   };
 
+  const handlePostPhotoPick = (e) => {
+    const files = Array.from(e.target.files || []).filter(f => f.type.startsWith('image/')).slice(0, 10);
+    if (files.length === 0) return;
+    setPostPhotos(prev => [...prev, ...files].slice(0, 10));
+    const newPreviews = files.map(f => URL.createObjectURL(f));
+    setPostPhotosPreviews(prev => [...prev, ...newPreviews].slice(0, 10));
+    e.target.value = '';
+  };
+
+  const removePostPhoto = (idx) => {
+    setPostPhotos(prev => prev.filter((_, i) => i !== idx));
+    setPostPhotosPreviews(prev => { URL.revokeObjectURL(prev[idx]); return prev.filter((_, i) => i !== idx); });
+  };
+
+  const handleEditPhotoPick = (e) => {
+    const files = Array.from(e.target.files || []).filter(f => f.type.startsWith('image/')).slice(0, 10);
+    if (files.length === 0) return;
+    setEditPostPhotos(prev => [...prev, ...files].slice(0, 10));
+    const newPreviews = files.map(f => URL.createObjectURL(f));
+    setEditPostPhotosPreviews(prev => [...prev, ...newPreviews].slice(0, 10));
+    e.target.value = '';
+  };
+
+  const removeEditPhoto = (idx) => {
+    setEditPostPhotos(prev => prev.filter((_, i) => i !== idx));
+    setEditPostPhotosPreviews(prev => { URL.revokeObjectURL(prev[idx]); return prev.filter((_, i) => i !== idx); });
+  };
+
   const handleCreatePost = async () => {
-    if (!newPostContent.trim()) return;
-    const res = await fetch('/api/community', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ authorId: userData?.id, authorName: `${userData?.firstname} ${userData?.lastname}`, content: newPostContent }) });
-    const data = await res.json();
-    if (data.success) { setNewPostContent(''); loadCommunityPosts(); showToast('Post shared!', 'success'); }
+    if (!newPostContent.trim() && postPhotos.length === 0) return;
+    setPostUploading(true);
+    try {
+      if (postPhotos.length > 0) {
+        const formData = new FormData();
+        formData.append('authorId', userData?.id);
+        formData.append('authorName', `${userData?.firstname} ${userData?.lastname}`);
+        formData.append('content', newPostContent);
+        postPhotos.forEach(f => formData.append('images', f));
+        const res = await fetch('/api/community', { method: 'POST', body: formData });
+        const data = await res.json();
+        if (data.success) { setNewPostContent(''); setPostPhotos([]); postPhotosPreviews.forEach(u => URL.revokeObjectURL(u)); setPostPhotosPreviews([]); loadCommunityPosts(); showToast('Post shared!', 'success'); }
+        else showToast(data.message || 'Failed to post', 'error');
+      } else {
+        const res = await fetch('/api/community', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ authorId: userData?.id, authorName: `${userData?.firstname} ${userData?.lastname}`, content: newPostContent }) });
+        const data = await res.json();
+        if (data.success) { setNewPostContent(''); loadCommunityPosts(); showToast('Post shared!', 'success'); }
+      }
+    } catch { showToast('Failed to create post', 'error'); }
+    setPostUploading(false);
   };
 
   const handleEditPost = async (postId) => {
-    if (!editPostContent.trim()) return;
-    const res = await fetch('/api/community', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: postId, content: editPostContent, userId: userData?.id }) });
-    const data = await res.json();
-    if (data.success) { setEditingPost(null); setEditPostContent(''); loadCommunityPosts(); showToast('Post updated!', 'success'); }
-    else showToast(data.message || 'Failed to update', 'error');
+    if (!editPostContent.trim() && editPostPhotos.length === 0) return;
+    setPostUploading(true);
+    try {
+      if (editPostPhotos.length > 0 || editRemoveImageIds.length > 0) {
+        const formData = new FormData();
+        formData.append('id', postId);
+        formData.append('content', editPostContent);
+        formData.append('removeImageIds', JSON.stringify(editRemoveImageIds));
+        editPostPhotos.forEach(f => formData.append('newImages', f));
+        const res = await fetch('/api/community', { method: 'PUT', body: formData });
+        const data = await res.json();
+        if (data.success) { setEditingPost(null); setEditPostContent(''); setEditPostPhotos([]); editPostPhotosPreviews.forEach(u => URL.revokeObjectURL(u)); setEditPostPhotosPreviews([]); setEditRemoveImageIds([]); loadCommunityPosts(); showToast('Post updated!', 'success'); }
+        else showToast(data.message || 'Failed to update', 'error');
+      } else {
+        const res = await fetch('/api/community', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: postId, content: editPostContent }) });
+        const data = await res.json();
+        if (data.success) { setEditingPost(null); setEditPostContent(''); loadCommunityPosts(); showToast('Post updated!', 'success'); }
+        else showToast(data.message || 'Failed to update', 'error');
+      }
+    } catch { showToast('Failed to update post', 'error'); }
+    setPostUploading(false);
   };
 
-  const handleLikePost = async (postId) => {
-    setCommunityPosts(prev => prev.map(p => p.id === postId ? { ...p, liked: !p.liked, likeCount: p.liked ? (p.likeCount - 1) : (p.likeCount + 1) } : p));
-    setLikeAnimating(prev => ({ ...prev, [postId]: true }));
-    setTimeout(() => setLikeAnimating(prev => ({ ...prev, [postId]: false })), 600);
-    const res = await fetch('/api/community/like', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ postId, userId: userData?.id }) });
+  const REACTION_EMOJIS = { heart: '❤️', fire: '🔥', praise: '🙌' };
+  const REACTION_LABELS = { heart: 'Love', fire: 'Fire', praise: 'Praise' };
+
+  const handleReactPost = async (postId, reactionType = 'heart') => {
+    setReactionPickerOpen(null);
+    const post = communityPosts.find(p => p.id === postId);
+    if (!post) return;
+
+    // Optimistic update
+    const wasSameReaction = post.myReaction === reactionType;
+    setCommunityPosts(prev => prev.map(p => {
+      if (p.id !== postId) return p;
+      const counts = { ...(p.reactionCounts || { heart: 0, fire: 0, praise: 0, total: 0 }) };
+      if (p.myReaction) { counts[p.myReaction] = Math.max(0, (counts[p.myReaction] || 0) - 1); counts.total = Math.max(0, counts.total - 1); }
+      if (!wasSameReaction) { counts[reactionType] = (counts[reactionType] || 0) + 1; counts.total = counts.total + 1; }
+      return { ...p, liked: !wasSameReaction, myReaction: wasSameReaction ? null : reactionType, likeCount: counts.total, reactionCounts: counts };
+    }));
+    setLikeAnimating(prev => ({ ...prev, [postId]: reactionType }));
+    setTimeout(() => setLikeAnimating(prev => ({ ...prev, [postId]: false })), 700);
+
+    const res = await fetch('/api/community/like', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ postId, userId: userData?.id, reactionType }) });
     if (!(await res.json()).success) loadCommunityPosts();
+  };
+
+  const handleReactionLongPressStart = (postId) => {
+    const timer = setTimeout(() => { setReactionPickerOpen(postId); }, 500);
+    setReactionLongPressTimer(timer);
+  };
+
+  const handleReactionLongPressEnd = (postId) => {
+    if (reactionLongPressTimer) { clearTimeout(reactionLongPressTimer); setReactionLongPressTimer(null); }
+    if (!reactionPickerOpen) {
+      // Short tap = default heart or toggle off
+      const post = communityPosts.find(p => p.id === postId);
+      handleReactPost(postId, post?.myReaction || 'heart');
+    }
+  };
+
+  const handleViewReactions = async (postId) => {
+    setReactionViewerOpen(postId);
+    setReactionViewerLoading(true);
+    setReactionViewerFilter('all');
+    try {
+      const res = await fetch(`/api/community/like?postId=${postId}`);
+      const data = await res.json();
+      if (data.success) { setReactionViewerData(data.data || []); setReactionViewerCounts(data.counts || {}); }
+    } catch { /* silent */ }
+    setReactionViewerLoading(false);
   };
 
   const handleDeletePost = async (postId) => {
@@ -3743,7 +3863,8 @@ Examples:
   // ============================================
   const loadLineupExcuses = async () => {
     try {
-      const params = isAdmin ? '?all=true' : `?userId=${userData?.id}`;
+      if (!isAdmin && !userData?.id) return;
+      const params = isAdmin ? '?all=true' : `?userId=${userData.id}`;
       const res = await fetch(`/api/lineup/excuses${params}`);
       const data = await res.json();
       if (data.success) setLineupExcuses(data.data || []);
@@ -5906,12 +6027,28 @@ Examples:
                     </div>
                     <div className="community-compose-body">
                       <textarea className="community-compose-input" placeholder="Share something with the community..." rows={3} value={newPostContent} onChange={(e) => setNewPostContent(e.target.value)} />
+                      {postPhotosPreviews.length > 0 && (
+                        <div className="community-photo-previews">
+                          {postPhotosPreviews.map((src, i) => (
+                            <div key={i} className="community-photo-preview-item">
+                              <img src={src} alt="" />
+                              <button className="community-photo-remove" onClick={() => removePostPhoto(i)}><i className="fas fa-times"></i></button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                       <div className="community-compose-actions">
-                        <button className="community-verse-share-btn" onClick={() => setShowVerseShareModal(true)} title="Share a Bible verse">
-                          <i className="fas fa-bible"></i> <span className="verse-share-label">Bible Verse</span>
-                        </button>
-                        <button className="btn-primary community-post-btn" onClick={handleCreatePost} disabled={!newPostContent.trim()}>
-                          <i className="fas fa-paper-plane"></i> Post
+                        <div className="community-compose-left-actions">
+                          <label className="community-photo-btn" title="Add photos">
+                            <i className="fas fa-images"></i> <span className="photo-btn-label">Photo</span>
+                            <input type="file" accept="image/*" multiple hidden onChange={handlePostPhotoPick} />
+                          </label>
+                          <button className="community-verse-share-btn" onClick={() => setShowVerseShareModal(true)} title="Share a Bible verse">
+                            <i className="fas fa-bible"></i> <span className="verse-share-label">Bible Verse</span>
+                          </button>
+                        </div>
+                        <button className="btn-primary community-post-btn" onClick={handleCreatePost} disabled={(!newPostContent.trim() && postPhotos.length === 0) || postUploading}>
+                          {postUploading ? <><i className="fas fa-spinner fa-spin"></i> Posting...</> : <><i className="fas fa-paper-plane"></i> Post</>}
                         </button>
                       </div>
                     </div>
@@ -5960,7 +6097,7 @@ Examples:
                                 )}
                                 {userData?.id === post.author_id && (
                                   <>
-                                    <button className="community-dropdown-item" onClick={() => { setEditingPost(post.id); setEditPostContent(post.content); }}>
+                                    <button className="community-dropdown-item" onClick={() => { setEditingPost(post.id); setEditPostContent(post.content); setEditPostPhotos([]); setEditPostPhotosPreviews([]); setEditRemoveImageIds([]); }}>
                                       <i className="fas fa-edit"></i> Edit Post
                                     </button>
                                     <button className="community-dropdown-item delete" onClick={() => handleDeletePost(post.id)}>
@@ -5978,21 +6115,99 @@ Examples:
                     {editingPost === post.id ? (
                       <div className="community-edit-box">
                         <textarea className="community-compose-input" value={editPostContent} onChange={(e) => setEditPostContent(e.target.value)} rows={3} />
+                        {/* Existing images with remove option */}
+                        {(post.images || []).filter(img => !editRemoveImageIds.includes(img.id)).length > 0 && (
+                          <div className="community-photo-previews" style={{ marginTop: 8 }}>
+                            {(post.images || []).filter(img => !editRemoveImageIds.includes(img.id)).map((img) => (
+                              <div key={img.id} className="community-photo-preview-item">
+                                <img src={`/api/recordings/stream?fileId=${img.google_drive_file_id}`} alt="" />
+                                <button className="community-photo-remove" onClick={() => setEditRemoveImageIds(prev => [...prev, img.id])}><i className="fas fa-times"></i></button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        {/* New photo previews */}
+                        {editPostPhotosPreviews.length > 0 && (
+                          <div className="community-photo-previews" style={{ marginTop: 8 }}>
+                            {editPostPhotosPreviews.map((src, i) => (
+                              <div key={`new-${i}`} className="community-photo-preview-item">
+                                <img src={src} alt="" />
+                                <button className="community-photo-remove" onClick={() => removeEditPhoto(i)}><i className="fas fa-times"></i></button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                         <div className="community-edit-actions">
-                          <button className="btn-primary btn-small" onClick={() => handleEditPost(post.id)}><i className="fas fa-check"></i> Save</button>
-                          <button className="btn-secondary btn-small" onClick={() => { setEditingPost(null); setEditPostContent(''); }}>Cancel</button>
+                          <label className="community-photo-btn" title="Add photos" style={{ marginRight: 'auto' }}>
+                            <i className="fas fa-images"></i> Add Photos
+                            <input type="file" accept="image/*" multiple hidden onChange={handleEditPhotoPick} />
+                          </label>
+                          <button className="btn-primary btn-small" onClick={() => handleEditPost(post.id)} disabled={postUploading}>{postUploading ? <><i className="fas fa-spinner fa-spin"></i> Saving...</> : <><i className="fas fa-check"></i> Save</>}</button>
+                          <button className="btn-secondary btn-small" onClick={() => { setEditingPost(null); setEditPostContent(''); setEditPostPhotos([]); editPostPhotosPreviews.forEach(u => URL.revokeObjectURL(u)); setEditPostPhotosPreviews([]); setEditRemoveImageIds([]); }}>Cancel</button>
                         </div>
                       </div>
                     ) : (
-                      <div className="community-post-content" style={{ whiteSpace: 'pre-wrap' }}>{post.content}</div>
+                      <>
+                        {post.content && <div className="community-post-content" style={{ whiteSpace: 'pre-wrap' }}>{post.content}</div>}
+                        {/* Photo collage display */}
+                        {post.images && post.images.length > 0 && (
+                          <div className={`community-photo-collage collage-${Math.min(post.images.length, 5)}`} onClick={() => { setPhotoViewerOpen(post); setPhotoViewerIndex(0); }}>
+                            {post.images.slice(0, 5).map((img, imgIdx) => (
+                              <div key={img.id} className={`collage-item collage-item-${imgIdx}`} onClick={(e) => { e.stopPropagation(); setPhotoViewerOpen(post); setPhotoViewerIndex(imgIdx); }}>
+                                {!communityImgLoaded[img.id] && (
+                                  <div className="community-img-loader">
+                                    <img src="/assets/LOGO.png" alt="" className="community-img-loader-logo" />
+                                  </div>
+                                )}
+                                <img src={`/api/recordings/stream?fileId=${img.google_drive_file_id}`} alt="" className={`collage-img${communityImgLoaded[img.id] ? ' loaded' : ''}`} onLoad={() => setCommunityImgLoaded(prev => ({ ...prev, [img.id]: true }))} />
+                                {imgIdx === 4 && post.images.length > 5 && (
+                                  <div className="collage-more-overlay">+{post.images.length - 5}</div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </>
+                    )}
+
+                    {/* Reaction summary badges */}
+                    {post.reactionCounts && post.reactionCounts.total > 0 && (
+                      <div className="community-reaction-summary" onClick={() => handleViewReactions(post.id)}>
+                        <div className="community-reaction-badges">
+                          {post.reactionCounts.heart > 0 && <span className="reaction-badge heart">❤️</span>}
+                          {post.reactionCounts.fire > 0 && <span className="reaction-badge fire">🔥</span>}
+                          {post.reactionCounts.praise > 0 && <span className="reaction-badge praise">🙌</span>}
+                        </div>
+                        <span className="community-reaction-count">{post.reactionCounts.total}</span>
+                      </div>
                     )}
 
                     <div className="community-post-footer">
                       {featureOn('community.like_comment') && (
-                        <button className={`community-react-btn${post.liked ? ' liked' : ''}${likeAnimating[post.id] ? ' animating' : ''}`} onClick={() => handleLikePost(post.id)}>
-                          <i className={`${post.liked ? 'fas' : 'far'} fa-heart`}></i>
-                          <span>{post.likeCount || 0}</span>
-                        </button>
+                        <div className="community-react-wrapper">
+                          {reactionPickerOpen === post.id && (
+                            <div className="community-reaction-picker" onMouseLeave={() => setReactionPickerOpen(null)}>
+                              {['heart', 'fire', 'praise'].map(rType => (
+                                <button key={rType} className={`reaction-picker-item${post.myReaction === rType ? ' active' : ''}`} onClick={() => handleReactPost(post.id, rType)} title={REACTION_LABELS[rType]}>
+                                  <span className="reaction-picker-emoji">{REACTION_EMOJIS[rType]}</span>
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                          <button
+                            className={`community-react-btn${post.liked ? ` liked ${post.myReaction || 'heart'}` : ''}${likeAnimating[post.id] ? ' animating' : ''}`}
+                            onClick={() => handleReactPost(post.id, post.myReaction || 'heart')}
+                            onMouseDown={() => handleReactionLongPressStart(post.id)}
+                            onMouseUp={() => { if (reactionLongPressTimer) { clearTimeout(reactionLongPressTimer); setReactionLongPressTimer(null); } }}
+                            onMouseLeave={() => { if (reactionLongPressTimer) { clearTimeout(reactionLongPressTimer); setReactionLongPressTimer(null); } }}
+                            onTouchStart={() => handleReactionLongPressStart(post.id)}
+                            onTouchEnd={(e) => { e.preventDefault(); if (reactionLongPressTimer) { clearTimeout(reactionLongPressTimer); setReactionLongPressTimer(null); } if (!reactionPickerOpen) handleReactPost(post.id, post.myReaction || 'heart'); }}
+                            onContextMenu={(e) => { e.preventDefault(); setReactionPickerOpen(post.id); }}
+                          >
+                            <span className="react-btn-emoji">{post.myReaction ? REACTION_EMOJIS[post.myReaction] : '🤍'}</span>
+                            <span>{post.myReaction ? REACTION_LABELS[post.myReaction] : 'React'}</span>
+                          </button>
+                        </div>
                       )}
                       {featureOn('community.like_comment') && (
                         <button className={`community-react-btn${showComments[post.id] ? ' active' : ''}`} onClick={() => { setShowComments((p) => ({ ...p, [post.id]: !p[post.id] })); if (!postComments[post.id]) loadPostComments(post.id); }}>
@@ -6187,6 +6402,108 @@ Examples:
                       </div>
                     )}
                   </div>
+                </div>
+              </div>
+            )}
+
+            {/* Who Reacted Modal */}
+            {reactionViewerOpen && (
+              <div className="community-reaction-viewer-overlay" onClick={() => setReactionViewerOpen(null)}>
+                <div className="community-reaction-viewer" onClick={(e) => e.stopPropagation()}>
+                  <div className="reaction-viewer-header">
+                    <h3>Reactions</h3>
+                    <button className="reaction-viewer-close" onClick={() => setReactionViewerOpen(null)}><i className="fas fa-times"></i></button>
+                  </div>
+                  <div className="reaction-viewer-tabs">
+                    <button className={`reaction-viewer-tab${reactionViewerFilter === 'all' ? ' active' : ''}`} onClick={() => setReactionViewerFilter('all')}>
+                      All {(reactionViewerCounts.heart || 0) + (reactionViewerCounts.fire || 0) + (reactionViewerCounts.praise || 0)}
+                    </button>
+                    {(reactionViewerCounts.heart || 0) > 0 && (
+                      <button className={`reaction-viewer-tab${reactionViewerFilter === 'heart' ? ' active' : ''}`} onClick={() => setReactionViewerFilter('heart')}>
+                        ❤️ {reactionViewerCounts.heart}
+                      </button>
+                    )}
+                    {(reactionViewerCounts.fire || 0) > 0 && (
+                      <button className={`reaction-viewer-tab${reactionViewerFilter === 'fire' ? ' active' : ''}`} onClick={() => setReactionViewerFilter('fire')}>
+                        🔥 {reactionViewerCounts.fire}
+                      </button>
+                    )}
+                    {(reactionViewerCounts.praise || 0) > 0 && (
+                      <button className={`reaction-viewer-tab${reactionViewerFilter === 'praise' ? ' active' : ''}`} onClick={() => setReactionViewerFilter('praise')}>
+                        🙌 {reactionViewerCounts.praise}
+                      </button>
+                    )}
+                  </div>
+                  <div className="reaction-viewer-list">
+                    {reactionViewerLoading ? (
+                      <div className="reaction-viewer-loading"><i className="fas fa-spinner fa-spin"></i> Loading...</div>
+                    ) : (
+                      (reactionViewerData || [])
+                        .filter(r => reactionViewerFilter === 'all' || r.reactionType === reactionViewerFilter)
+                        .map((r, i) => (
+                          <div key={i} className="reaction-viewer-item" onClick={() => { setReactionViewerOpen(null); handleViewProfile(r.userId, r.name, r.picture); }}>
+                            <div className="reaction-viewer-avatar">
+                              {r.picture ? (
+                                <img src={r.picture} alt="" referrerPolicy="no-referrer" />
+                              ) : (
+                                <span>{r.name?.split(' ').map(n => n[0]).join('').slice(0,2)}</span>
+                              )}
+                            </div>
+                            <div className="reaction-viewer-info">
+                              <span className="reaction-viewer-name">{r.name}</span>
+                            </div>
+                            <span className="reaction-viewer-emoji">{REACTION_EMOJIS[r.reactionType] || '❤️'}</span>
+                          </div>
+                        ))
+                    )}
+                    {!reactionViewerLoading && (reactionViewerData || []).filter(r => reactionViewerFilter === 'all' || r.reactionType === reactionViewerFilter).length === 0 && (
+                      <div className="reaction-viewer-loading">No reactions yet</div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Photo Viewer Modal */}
+            {photoViewerOpen && (
+              <div className="community-photo-viewer-overlay" onClick={() => setPhotoViewerOpen(null)}>
+                <div className="community-photo-viewer" onClick={(e) => e.stopPropagation()}>
+                  <button className="community-photo-viewer-close" onClick={() => setPhotoViewerOpen(null)}><i className="fas fa-times"></i></button>
+                  <div className="community-photo-viewer-main">
+                    {photoViewerOpen.images && photoViewerOpen.images[photoViewerIndex] && (
+                      <>
+                        {!communityImgLoaded[`viewer-${photoViewerOpen.images[photoViewerIndex].id}`] && (
+                          <div className="community-img-loader viewer-loader">
+                            <img src="/assets/LOGO.png" alt="" className="community-img-loader-logo" />
+                          </div>
+                        )}
+                        <img
+                          src={`/api/recordings/stream?fileId=${photoViewerOpen.images[photoViewerIndex].google_drive_file_id}`}
+                          alt=""
+                          className={`community-photo-viewer-img${communityImgLoaded[`viewer-${photoViewerOpen.images[photoViewerIndex].id}`] ? ' loaded' : ''}`}
+                          onLoad={() => setCommunityImgLoaded(prev => ({ ...prev, [`viewer-${photoViewerOpen.images[photoViewerIndex].id}`]: true }))}
+                        />
+                      </>
+                    )}
+                    {photoViewerIndex > 0 && (
+                      <button className="community-photo-viewer-nav prev" onClick={() => setPhotoViewerIndex(i => i - 1)}><i className="fas fa-chevron-left"></i></button>
+                    )}
+                    {photoViewerOpen.images && photoViewerIndex < photoViewerOpen.images.length - 1 && (
+                      <button className="community-photo-viewer-nav next" onClick={() => setPhotoViewerIndex(i => i + 1)}><i className="fas fa-chevron-right"></i></button>
+                    )}
+                  </div>
+                  <div className="community-photo-viewer-counter">
+                    {photoViewerIndex + 1} / {photoViewerOpen.images?.length || 0}
+                  </div>
+                  {photoViewerOpen.images && photoViewerOpen.images.length > 1 && (
+                    <div className="community-photo-viewer-thumbs">
+                      {photoViewerOpen.images.map((img, i) => (
+                        <div key={img.id} className={`community-photo-viewer-thumb${i === photoViewerIndex ? ' active' : ''}`} onClick={() => setPhotoViewerIndex(i)}>
+                          <img src={`/api/recordings/stream?fileId=${img.google_drive_file_id}`} alt="" />
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
             )}

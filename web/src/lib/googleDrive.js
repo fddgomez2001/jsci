@@ -61,6 +61,13 @@ async function getAccessToken(forceRefresh = false) {
   if (!response.ok) {
     const error = await response.text();
     console.error('Token refresh failed:', error);
+    // If refresh token is expired/revoked, provide a clear message
+    if (error.includes('invalid_grant')) {
+      throw new Error(
+        'Google refresh token is expired or revoked. Please re-run: node get-google-refresh-token.js to get a new refresh token. ' +
+        'If your OAuth app is in "Testing" mode, tokens expire after 7 days — publish the app to "Production" in Google Cloud Console → OAuth consent screen.'
+      );
+    }
     throw new Error(`Failed to get Google access token: ${error}`);
   }
 

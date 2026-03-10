@@ -18,8 +18,10 @@ export async function GET(request) {
 
     let query = supabase.from('lineup_excuses').select('*').order('created_at', { ascending: false });
 
-    if (userId && !all) {
+    if (userId && userId !== 'undefined' && !all) {
       query = query.eq('user_id', userId);
+    } else if (!all && (!userId || userId === 'undefined')) {
+      return NextResponse.json({ success: true, data: [] });
     }
     if (status) {
       query = query.eq('status', status);

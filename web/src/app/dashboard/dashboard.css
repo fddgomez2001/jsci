@@ -2596,6 +2596,384 @@ body.dark-mode .sidebar-lock-tooltip {
   word-wrap: break-word;
 }
 
+/* ============================================
+   COMMUNITY PHOTO UPLOAD & COLLAGE
+   ============================================ */
+
+/* Compose left actions grouping */
+.community-compose-left-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+}
+
+/* Photo picker button */
+.community-photo-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: 20px;
+  background: rgba(34, 197, 94, 0.08);
+  color: #22c55e;
+  font-family: 'Poppins', sans-serif;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  border: none;
+}
+
+.community-photo-btn:hover {
+  background: rgba(34, 197, 94, 0.15);
+  transform: translateY(-1px);
+}
+
+.community-photo-btn i {
+  font-size: 0.9rem;
+}
+
+/* Photo preview grid in compose/edit */
+.community-photo-previews {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+  padding: 0;
+}
+
+.community-photo-preview-item {
+  position: relative;
+  border-radius: 10px;
+  overflow: hidden;
+  aspect-ratio: 1;
+  background: rgba(0,0,0,0.04);
+}
+
+.community-photo-preview-item img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.community-photo-remove {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: rgba(0,0,0,0.6);
+  color: #fff;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.6rem;
+  transition: all 0.2s;
+  z-index: 2;
+}
+
+.community-photo-remove:hover {
+  background: #dc3545;
+  transform: scale(1.1);
+}
+
+/* ============================================
+   FACEBOOK-STYLE PHOTO COLLAGE
+   ============================================ */
+.community-photo-collage {
+  display: grid;
+  gap: 3px;
+  cursor: pointer;
+  overflow: hidden;
+  border-radius: 0;
+  max-height: 500px;
+}
+
+/* 1 photo - full width */
+.community-photo-collage.collage-1 {
+  grid-template-columns: 1fr;
+  max-height: 480px;
+}
+
+/* 2 photos - side by side */
+.community-photo-collage.collage-2 {
+  grid-template-columns: 1fr 1fr;
+  max-height: 360px;
+}
+
+/* 3 photos - 1 big left, 2 stacked right */
+.community-photo-collage.collage-3 {
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+  max-height: 400px;
+}
+
+.community-photo-collage.collage-3 .collage-item-0 {
+  grid-row: 1 / 3;
+}
+
+/* 4 photos - 2x2 grid */
+.community-photo-collage.collage-4 {
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+  max-height: 420px;
+}
+
+/* 5+ photos - 2 top, 3 bottom */
+.community-photo-collage.collage-5 {
+  grid-template-columns: 1fr 1fr 1fr;
+  grid-template-rows: 1.3fr 1fr;
+  max-height: 420px;
+}
+
+.community-photo-collage.collage-5 .collage-item-0 {
+  grid-column: 1 / 3;
+}
+
+.community-photo-collage.collage-5 .collage-item-1 {
+  grid-column: 3 / 4;
+}
+
+.collage-item {
+  position: relative;
+  overflow: hidden;
+  background: #111;
+  min-height: 0;
+}
+
+.collage-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  opacity: 0;
+  transition: opacity 0.4s ease;
+}
+
+.collage-img.loaded {
+  opacity: 1;
+}
+
+.collage-item:hover .collage-img {
+  transform: scale(1.02);
+  transition: opacity 0.4s ease, transform 0.3s ease;
+}
+
+/* "+N more" overlay */
+.collage-more-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-family: 'Poppins', sans-serif;
+  font-size: 1.8rem;
+  font-weight: 700;
+  z-index: 2;
+  pointer-events: none;
+}
+
+/* ============================================
+   IMAGE LOADING PLACEHOLDER (LOGO PULSE)
+   ============================================ */
+.community-img-loader {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 50%, #f8f9fa 100%);
+  background-size: 200% 200%;
+  animation: communityImgShimmer 1.8s ease infinite;
+  z-index: 1;
+}
+
+.community-img-loader-logo {
+  width: 40px;
+  height: 40px;
+  object-fit: contain;
+  opacity: 0.35;
+  animation: communityLogoPulse 1.5s ease-in-out infinite;
+  filter: grayscale(0.3);
+}
+
+.community-img-loader.viewer-loader {
+  background: rgba(0,0,0,0.8);
+}
+
+.community-img-loader.viewer-loader .community-img-loader-logo {
+  width: 60px;
+  height: 60px;
+  opacity: 0.5;
+  filter: grayscale(0) brightness(1.2);
+}
+
+@keyframes communityImgShimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+@keyframes communityLogoPulse {
+  0%, 100% { transform: scale(1); opacity: 0.35; }
+  50% { transform: scale(1.15); opacity: 0.55; }
+}
+
+/* ============================================
+   PHOTO VIEWER MODAL (LIGHTBOX)
+   ============================================ */
+.community-photo-viewer-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.92);
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: communityFadeIn 0.25s ease;
+}
+
+@keyframes communityFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.community-photo-viewer {
+  position: relative;
+  width: 100%;
+  max-width: 900px;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+}
+
+.community-photo-viewer-close {
+  position: absolute;
+  top: -8px;
+  right: 0;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.1);
+  color: #fff;
+  border: none;
+  cursor: pointer;
+  font-size: 1.1rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+  transition: all 0.2s;
+}
+
+.community-photo-viewer-close:hover {
+  background: rgba(255,255,255,0.2);
+  transform: scale(1.1);
+}
+
+.community-photo-viewer-main {
+  position: relative;
+  width: 100%;
+  max-height: 70vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border-radius: 8px;
+}
+
+.community-photo-viewer-img {
+  max-width: 100%;
+  max-height: 70vh;
+  object-fit: contain;
+  border-radius: 8px;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.community-photo-viewer-img.loaded {
+  opacity: 1;
+}
+
+.community-photo-viewer-nav {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  background: rgba(0,0,0,0.5);
+  color: #fff;
+  border: none;
+  cursor: pointer;
+  font-size: 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 5;
+  transition: all 0.2s;
+  backdrop-filter: blur(4px);
+}
+
+.community-photo-viewer-nav:hover {
+  background: rgba(0,0,0,0.75);
+  transform: translateY(-50%) scale(1.08);
+}
+
+.community-photo-viewer-nav.prev { left: 10px; }
+.community-photo-viewer-nav.next { right: 10px; }
+
+.community-photo-viewer-counter {
+  color: rgba(255,255,255,0.7);
+  font-family: 'Poppins', sans-serif;
+  font-size: 0.82rem;
+  font-weight: 500;
+}
+
+.community-photo-viewer-thumbs {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  max-width: 100%;
+  padding: 4px 0;
+}
+
+.community-photo-viewer-thumb {
+  width: 56px;
+  height: 56px;
+  border-radius: 6px;
+  overflow: hidden;
+  cursor: pointer;
+  flex-shrink: 0;
+  border: 2px solid transparent;
+  opacity: 0.5;
+  transition: all 0.2s;
+}
+
+.community-photo-viewer-thumb.active {
+  border-color: var(--accent);
+  opacity: 1;
+}
+
+.community-photo-viewer-thumb:hover {
+  opacity: 0.85;
+}
+
+.community-photo-viewer-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
 /* Post footer - reactions */
 .community-post-footer {
   display: flex;
@@ -2626,29 +3004,313 @@ body.dark-mode .sidebar-lock-tooltip {
 }
 
 .community-react-btn.liked {
+  font-weight: 600;
+}
+
+.community-react-btn.liked.heart {
   color: #e74c3c;
 }
 
-.community-react-btn.liked i {
-  color: #e74c3c;
+.community-react-btn.liked.fire {
+  color: #f59e0b;
 }
 
-.community-react-btn.animating i {
-  animation: heartPop 0.5s ease-out;
-}
-
-.community-react-btn.animating::after {
-  content: 'â¤';
-  position: absolute;
-  top: 4px;
-  left: 18px;
-  font-size: 0.7rem;
-  animation: heartFloat 0.6s ease-out forwards;
-  pointer-events: none;
+.community-react-btn.liked.praise {
+  color: #8b5cf6;
 }
 
 .community-react-btn.active {
   color: var(--primary);
+}
+
+/* ============================================
+   REACTION SYSTEM (Heart, Fire, Praise)
+   ============================================ */
+
+/* React button wrapper - relative for picker positioning */
+.community-react-wrapper {
+  position: relative;
+}
+
+/* Emoji in react button */
+.react-btn-emoji {
+  font-size: 1.05rem;
+  line-height: 1;
+  transition: transform 0.2s;
+}
+
+/* Colored states per reaction type — set in .community-react-btn.liked section above */
+
+/* Animating per type */
+.community-react-btn.animating .react-btn-emoji {
+  animation: reactionPop 0.5s ease-out;
+}
+
+@keyframes reactionPop {
+  0% { transform: scale(1); }
+  30% { transform: scale(1.6); }
+  60% { transform: scale(0.85); }
+  100% { transform: scale(1); }
+}
+
+/* Reaction picker bubble (long-press / right-click) */
+.community-reaction-picker {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  display: flex;
+  gap: 4px;
+  padding: 8px 10px;
+  background: var(--bg-card, #fff);
+  border-radius: 28px;
+  box-shadow: 0 4px 24px rgba(0,0,0,0.15), 0 0 0 1px rgba(0,0,0,0.04);
+  z-index: 100;
+  animation: reactionPickerIn 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+@keyframes reactionPickerIn {
+  0% { opacity: 0; transform: scale(0.5) translateY(8px); }
+  100% { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+.reaction-picker-item {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+  position: relative;
+}
+
+.reaction-picker-item:hover {
+  background: rgba(0,0,0,0.06);
+  transform: scale(1.3) translateY(-4px);
+}
+
+.reaction-picker-item.active {
+  background: rgba(146,108,21,0.1);
+}
+
+.reaction-picker-emoji {
+  font-size: 1.6rem;
+  line-height: 1;
+  transition: transform 0.15s;
+}
+
+.reaction-picker-item:hover .reaction-picker-emoji {
+  transform: scale(1.1);
+}
+
+/* ============================================
+   REACTION SUMMARY (badges above footer)
+   ============================================ */
+.community-reaction-summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 22px 2px;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+.community-reaction-summary:hover {
+  opacity: 0.75;
+}
+
+.community-reaction-badges {
+  display: flex;
+  gap: 0;
+}
+
+.reaction-badge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  font-size: 0.72rem;
+  border: 2px solid var(--bg-card, #fff);
+  margin-right: -4px;
+  position: relative;
+  z-index: 1;
+}
+
+.reaction-badge.heart { background: #fee2e2; z-index: 3; }
+.reaction-badge.fire { background: #fef3c7; z-index: 2; }
+.reaction-badge.praise { background: #ede9fe; z-index: 1; }
+
+.community-reaction-count {
+  font-family: 'Poppins', sans-serif;
+  font-size: 0.78rem;
+  color: #6c757d;
+  font-weight: 500;
+  margin-left: 4px;
+}
+
+/* ============================================
+   WHO REACTED VIEWER MODAL
+   ============================================ */
+.community-reaction-viewer-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.5);
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: communityFadeIn 0.2s ease;
+}
+
+.community-reaction-viewer {
+  background: var(--bg-card, #fff);
+  border-radius: 16px;
+  width: 90%;
+  max-width: 400px;
+  max-height: 70vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 12px 48px rgba(0,0,0,0.2);
+  animation: reactionPickerIn 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.reaction-viewer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px 12px;
+  border-bottom: 1px solid rgba(0,0,0,0.06);
+}
+
+.reaction-viewer-header h3 {
+  margin: 0;
+  font-family: 'Poppins', sans-serif;
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.reaction-viewer-close {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(0,0,0,0.05);
+  color: #666;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.8rem;
+  transition: all 0.2s;
+}
+
+.reaction-viewer-close:hover {
+  background: rgba(0,0,0,0.1);
+  color: #333;
+}
+
+.reaction-viewer-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 8px 16px;
+  border-bottom: 1px solid rgba(0,0,0,0.06);
+  overflow-x: auto;
+}
+
+.reaction-viewer-tab {
+  padding: 8px 14px;
+  border: none;
+  background: transparent;
+  border-radius: 20px;
+  font-family: 'Poppins', sans-serif;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #6c757d;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.2s;
+}
+
+.reaction-viewer-tab:hover {
+  background: rgba(0,0,0,0.04);
+}
+
+.reaction-viewer-tab.active {
+  background: var(--primary);
+  color: #fff;
+}
+
+.reaction-viewer-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 0;
+}
+
+.reaction-viewer-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 20px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.reaction-viewer-item:hover {
+  background: rgba(0,0,0,0.03);
+}
+
+.reaction-viewer-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--primary), var(--accent));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  overflow: hidden;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #fff;
+}
+
+.reaction-viewer-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.reaction-viewer-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.reaction-viewer-name {
+  font-family: 'Poppins', sans-serif;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.reaction-viewer-emoji {
+  font-size: 1.2rem;
+  flex-shrink: 0;
+}
+
+.reaction-viewer-loading {
+  text-align: center;
+  padding: 30px 20px;
+  color: #adb5bd;
+  font-size: 0.88rem;
 }
 
 /* Comments section - smooth slide */
@@ -2835,6 +3497,49 @@ body.dark-mode .sidebar-lock-tooltip {
     font-size: 0.78rem;
   }
 
+  /* Mobile reaction picker */
+  .community-reaction-picker {
+    padding: 6px 8px;
+    gap: 2px;
+  }
+  .reaction-picker-item {
+    width: 38px;
+    height: 38px;
+  }
+  .reaction-picker-emoji {
+    font-size: 1.35rem;
+  }
+
+  /* Mobile reaction summary */
+  .community-reaction-summary {
+    padding: 4px 14px 2px;
+  }
+  .reaction-badge {
+    width: 20px;
+    height: 20px;
+    font-size: 0.65rem;
+  }
+  .community-reaction-count {
+    font-size: 0.72rem;
+  }
+
+  /* Mobile who-reacted viewer */
+  .community-reaction-viewer {
+    width: 95%;
+    max-height: 60vh;
+  }
+  .reaction-viewer-tab {
+    padding: 6px 10px;
+    font-size: 0.75rem;
+  }
+  .reaction-viewer-avatar {
+    width: 34px;
+    height: 34px;
+  }
+  .reaction-viewer-name {
+    font-size: 0.82rem;
+  }
+
   .community-comment {
     gap: 8px;
   }
@@ -2874,8 +3579,48 @@ body.dark-mode .sidebar-lock-tooltip {
     font-size: 0.75rem;
   }
 
-  .verse-share-label {
+  .verse-share-label, .photo-btn-label {
     display: none;
+  }
+
+  .community-photo-btn {
+    padding: 7px 12px;
+    font-size: 0.75rem;
+  }
+
+  .community-photo-previews {
+    grid-template-columns: repeat(auto-fill, minmax(64px, 1fr));
+    gap: 6px;
+  }
+
+  .community-photo-collage {
+    max-height: 320px;
+  }
+
+  .community-photo-collage.collage-1 { max-height: 300px; }
+  .community-photo-collage.collage-2 { max-height: 220px; }
+  .community-photo-collage.collage-3 { max-height: 260px; }
+  .community-photo-collage.collage-4 { max-height: 280px; }
+  .community-photo-collage.collage-5 { max-height: 280px; }
+
+  .collage-more-overlay { font-size: 1.3rem; }
+
+  .community-photo-viewer {
+    padding: 10px;
+  }
+
+  .community-photo-viewer-nav {
+    width: 34px;
+    height: 34px;
+    font-size: 0.85rem;
+  }
+
+  .community-photo-viewer-nav.prev { left: 6px; }
+  .community-photo-viewer-nav.next { right: 6px; }
+
+  .community-photo-viewer-thumb {
+    width: 44px;
+    height: 44px;
   }
 
   .community-verse-modal {
@@ -6184,11 +6929,67 @@ body.dark-mode .community-react-btn:hover {
 }
 
 body.dark-mode .community-react-btn.liked {
-  color: #e74c3c;
+  font-weight: 600;
 }
+body.dark-mode .community-react-btn.liked.heart { color: #f87171; }
+body.dark-mode .community-react-btn.liked.fire { color: #fbbf24; }
+body.dark-mode .community-react-btn.liked.praise { color: #a78bfa; }
 
 body.dark-mode .community-react-btn.active {
   color: var(--primary);
+}
+
+/* Dark mode reaction picker */
+body.dark-mode .community-reaction-picker {
+  background: #2a2a2a;
+  box-shadow: 0 4px 24px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.08);
+}
+body.dark-mode .reaction-picker-item:hover {
+  background: rgba(255,255,255,0.1);
+}
+
+/* Dark mode reaction summary */
+body.dark-mode .reaction-badge.heart { background: rgba(239,68,68,0.2); }
+body.dark-mode .reaction-badge.fire { background: rgba(245,158,11,0.2); }
+body.dark-mode .reaction-badge.praise { background: rgba(139,92,246,0.2); }
+body.dark-mode .reaction-badge { border-color: var(--bg-card, #1a1a1a); }
+body.dark-mode .community-reaction-count { color: #adb5bd; }
+
+/* Dark mode who-reacted viewer */
+body.dark-mode .community-reaction-viewer-overlay {
+  background: rgba(0,0,0,0.7);
+}
+body.dark-mode .community-reaction-viewer {
+  background: #222;
+}
+body.dark-mode .reaction-viewer-header {
+  border-bottom-color: rgba(255,255,255,0.08);
+}
+body.dark-mode .reaction-viewer-close {
+  background: rgba(255,255,255,0.1);
+  color: #ccc;
+}
+body.dark-mode .reaction-viewer-close:hover {
+  background: rgba(255,255,255,0.15);
+  color: #fff;
+}
+body.dark-mode .reaction-viewer-tabs {
+  border-bottom-color: rgba(255,255,255,0.08);
+}
+body.dark-mode .reaction-viewer-tab {
+  color: #999;
+}
+body.dark-mode .reaction-viewer-tab:hover {
+  background: rgba(255,255,255,0.06);
+}
+body.dark-mode .reaction-viewer-item:hover {
+  background: rgba(255,255,255,0.04);
+}
+body.dark-mode .reaction-viewer-name {
+  color: #ddd;
+}
+body.dark-mode .reaction-viewer-loading {
+  color: #666;
 }
 
 body.dark-mode .community-comments-inner {
@@ -6234,6 +7035,39 @@ body.dark-mode .community-no-comments {
 
 body.dark-mode .community-empty {
   color: #555;
+}
+
+/* Dark mode - community photos */
+body.dark-mode .community-photo-btn {
+  background: rgba(34, 197, 94, 0.12);
+  color: #4ade80;
+}
+
+body.dark-mode .community-photo-btn:hover {
+  background: rgba(34, 197, 94, 0.2);
+}
+
+body.dark-mode .community-photo-preview-item {
+  background: rgba(255,255,255,0.06);
+}
+
+body.dark-mode .community-photo-remove {
+  background: rgba(0,0,0,0.7);
+}
+
+body.dark-mode .collage-item {
+  background: #1a1a2e;
+}
+
+body.dark-mode .community-img-loader {
+  background: linear-gradient(135deg, #1a1a2e 0%, #2a2a48 50%, #1a1a2e 100%);
+  background-size: 200% 200%;
+  animation: communityImgShimmer 1.8s ease infinite;
+}
+
+body.dark-mode .community-img-loader-logo {
+  filter: grayscale(0) brightness(1.3);
+  opacity: 0.4;
 }
 
 /* Dark mode - dropdown menu */
@@ -11572,6 +12406,19 @@ body.dark-mode .calendar-table th { color: #999; }
     padding: 8px 18px !important;
     font-size: 0.8rem !important;
   }
+
+  .community-photo-btn {
+    padding: 7px 12px;
+    font-size: 0.78rem;
+  }
+
+  .photo-btn-label {
+    display: none;
+  }
+
+  .community-photo-collage.collage-1 { max-height: 340px; }
+  .community-photo-collage.collage-2 { max-height: 260px; }
+  .community-photo-collage.collage-3 { max-height: 300px; }
 
   /* Community post cards mobile */
   .community-post-card {
