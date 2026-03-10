@@ -1246,9 +1246,10 @@ export default function DashboardPage() {
   const loadCommunityPosts = async () => {
     try {
       const res = await fetch(`/api/community${userData?.id ? `?userId=${userData.id}` : ''}`);
+      if (!res.ok) { console.warn('[Community] API returned', res.status); return; }
       const data = await res.json();
-      if (data.success) setCommunityPosts(data.data);
-    } catch { /* silent */ }
+      if (data.success) setCommunityPosts(data.data || []);
+    } catch (e) { console.warn('[Community] loadPosts error:', e.message); }
   };
 
   // ============================================
@@ -2928,21 +2929,24 @@ export default function DashboardPage() {
 
   const handleShareVersePost = async () => {
     if (!verseShareText || verseShareText.includes('not found')) return;
-    const content = `📖 ${verseShareRef.trim()}\n\n"${verseShareText.trim()}"\n${verseShareReflection.trim() ? `\n💭 My Reflection:\n${verseShareReflection.trim()}` : ''}`;
-    const res = await fetch('/api/community', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ authorId: userData?.id, authorName: `${userData?.firstname} ${userData?.lastname}`, content }),
-    });
-    const data = await res.json();
-    if (data.success) {
-      setShowVerseShareModal(false);
-      setVerseShareRef('');
-      setVerseShareText('');
-      setVerseShareReflection('');
-      loadCommunityPosts();
-      showToast('📖 Bible verse shared!', 'success');
-    }
+    try {
+      const content = `📖 ${verseShareRef.trim()}\n\n"${verseShareText.trim()}"\n${verseShareReflection.trim() ? `\n💭 My Reflection:\n${verseShareReflection.trim()}` : ''}`;
+      const res = await fetch('/api/community', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ authorId: userData?.id, authorName: `${userData?.firstname} ${userData?.lastname}`, content }),
+      });
+      if (!res.ok) { showToast('Failed to share verse', 'error'); return; }
+      const data = await res.json();
+      if (data.success) {
+        setShowVerseShareModal(false);
+        setVerseShareRef('');
+        setVerseShareText('');
+        setVerseShareReflection('');
+        loadCommunityPosts();
+        showToast('📖 Bible verse shared!', 'success');
+      } else { showToast(data.message || 'Failed to share verse', 'error'); }
+    } catch { showToast('Failed to share verse', 'error'); }
   };
 
   // ============================================
@@ -3091,8 +3095,12 @@ export default function DashboardPage() {
     setLikeAnimating(prev => ({ ...prev, [postId]: reactionType }));
     setTimeout(() => setLikeAnimating(prev => ({ ...prev, [postId]: false })), 700);
 
-    const res = await fetch('/api/community/like', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ postId, userId: userData?.id, reactionType }) });
-    if (!(await res.json()).success) loadCommunityPosts();
+    try {
+      const res = await fetch('/api/community/like', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ postId, userId: userData?.id, reactionType }) });
+      if (!res.ok) { loadCommunityPosts(); return; }
+      const data = await res.json();
+      if (!data.success) loadCommunityPosts();
+    } catch { loadCommunityPosts(); }
   };
 
   const handleReactionLongPressStart = (postId) => {
@@ -3125,39 +3133,57 @@ export default function DashboardPage() {
     if (!confirm('Are you sure you want to delete this post?')) return;
     setDeletingPost(postId);
     setTimeout(async () => {
-      const res = await fetch(`/api/community?id=${postId}&userId=${userData?.id}`, { method: 'DELETE' });
-      const data = await res.json();
-      if (data.success) { setCommunityPosts(prev => prev.filter(p => p.id !== postId)); showToast('Post deleted', 'success'); }
-      else { showToast(data.message || 'Failed to delete', 'error'); }
+      try {
+        const res = await fetch(`/api/community?id=${postId}&userId=${userData?.id}`, { method: 'DELETE' });
+        if (!res.ok) { showToast('Failed to delete post', 'error'); setDeletingPost(null); return; }
+        const data = await res.json();
+        if (data.success) { setCommunityPosts(prev => prev.filter(p => p.id !== postId)); showToast('Post deleted', 'success'); }
+        else { showToast(data.message || 'Failed to delete', 'error'); }
+      } catch (e) { showToast('Failed to delete post', 'error'); }
       setDeletingPost(null);
     }, 300);
   };
 
   const loadPostComments = async (postId) => {
-    const res = await fetch(`/api/community/comments?postId=${postId}&userId=${userData?.id}`);
-    const data = await res.json();
-    if (data.success) setPostComments((prev) => ({ ...prev, [postId]: data.data }));
+    try {
+      const res = await fetch(`/api/community/comments?postId=${postId}&userId=${userData?.id}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.success) setPostComments((prev) => ({ ...prev, [postId]: data.data || [] }));
+    } catch (e) { console.warn('[Community] loadComments error:', e.message); }
   };
 
   const handleAddComment = async (postId) => {
     const content = commentInputs[postId];
     if (!content?.trim()) return;
-    const res = await fetch('/api/community/comments', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ postId, authorId: userData?.id, authorName: `${userData?.firstname} ${userData?.lastname}`, content }) });
-    if ((await res.json()).success) { setCommentInputs((p) => ({ ...p, [postId]: '' })); loadPostComments(postId); loadCommunityPosts(); }
+    try {
+      const res = await fetch('/api/community/comments', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ postId, authorId: userData?.id, authorName: `${userData?.firstname} ${userData?.lastname}`, content }) });
+      if (!res.ok) { showToast('Failed to add comment', 'error'); return; }
+      const data = await res.json();
+      if (data.success) { setCommentInputs((p) => ({ ...p, [postId]: '' })); loadPostComments(postId); loadCommunityPosts(); }
+    } catch { showToast('Failed to add comment', 'error'); }
   };
 
   const handleEditComment = async (commentId, postId) => {
     if (!editCommentContent.trim()) return;
-    const res = await fetch('/api/community/comments', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: commentId, userId: userData?.id, content: editCommentContent }) });
-    if ((await res.json()).success) { setEditingComment(null); setEditCommentContent(''); loadPostComments(postId); showToast('Comment updated', 'success'); }
-    else showToast('Failed to update comment', 'error');
+    try {
+      const res = await fetch('/api/community/comments', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: commentId, userId: userData?.id, content: editCommentContent }) });
+      if (!res.ok) { showToast('Failed to update comment', 'error'); return; }
+      const data = await res.json();
+      if (data.success) { setEditingComment(null); setEditCommentContent(''); loadPostComments(postId); showToast('Comment updated', 'success'); }
+      else showToast('Failed to update comment', 'error');
+    } catch { showToast('Failed to update comment', 'error'); }
   };
 
   const handleDeleteComment = async (commentId, postId) => {
     if (!confirm('Delete this comment?')) return;
-    const res = await fetch(`/api/community/comments?id=${commentId}&userId=${userData?.id}`, { method: 'DELETE' });
-    if ((await res.json()).success) { loadPostComments(postId); loadCommunityPosts(); showToast('Comment deleted', 'success'); }
-    else showToast('Failed to delete comment', 'error');
+    try {
+      const res = await fetch(`/api/community/comments?id=${commentId}&userId=${userData?.id}`, { method: 'DELETE' });
+      if (!res.ok) { showToast('Failed to delete comment', 'error'); return; }
+      const data = await res.json();
+      if (data.success) { loadPostComments(postId); loadCommunityPosts(); showToast('Comment deleted', 'success'); }
+      else showToast('Failed to delete comment', 'error');
+    } catch { showToast('Failed to delete comment', 'error'); }
   };
 
   const handleLikeComment = async (commentId, postId) => {
@@ -3168,8 +3194,12 @@ export default function DashboardPage() {
     }));
     setCommentLikeAnimating(prev => ({ ...prev, [commentId]: true }));
     setTimeout(() => setCommentLikeAnimating(prev => ({ ...prev, [commentId]: false })), 600);
-    const res = await fetch('/api/community/comments/like', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ commentId, userId: userData?.id }) });
-    if (!(await res.json()).success) loadPostComments(postId);
+    try {
+      const res = await fetch('/api/community/comments/like', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ commentId, userId: userData?.id }) });
+      if (!res.ok) { loadPostComments(postId); return; }
+      const data = await res.json();
+      if (!data.success) loadPostComments(postId);
+    } catch { loadPostComments(postId); }
   };
 
   const handleViewProfile = async (authorId, authorName, authorPicture) => {
@@ -3188,8 +3218,11 @@ export default function DashboardPage() {
   };
 
   const handlePinPost = async (postId, isPinned) => {
-    await fetch('/api/community', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: postId, isPinned: !isPinned }) });
-    loadCommunityPosts();
+    try {
+      const res = await fetch('/api/community', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: postId, isPinned: !isPinned }) });
+      if (!res.ok) { showToast('Failed to pin/unpin post', 'error'); return; }
+      loadCommunityPosts();
+    } catch { showToast('Failed to pin/unpin post', 'error'); }
   };
 
   // Bible content for sidebar cards (rotates hourly)
@@ -6159,7 +6192,7 @@ Examples:
                                     <img src="/assets/LOGO.png" alt="" className="community-img-loader-logo" />
                                   </div>
                                 )}
-                                <img src={`/api/recordings/stream?fileId=${img.google_drive_file_id}`} alt="" className={`collage-img${communityImgLoaded[img.id] ? ' loaded' : ''}`} onLoad={() => setCommunityImgLoaded(prev => ({ ...prev, [img.id]: true }))} />
+                                <img src={`/api/recordings/stream?fileId=${img.google_drive_file_id}`} alt="" className={`collage-img${communityImgLoaded[img.id] ? ' loaded' : ''}`} onLoad={() => setCommunityImgLoaded(prev => ({ ...prev, [img.id]: true }))} onError={() => setCommunityImgLoaded(prev => ({ ...prev, [img.id]: true }))} />
                                 {imgIdx === 4 && post.images.length > 5 && (
                                   <div className="collage-more-overlay">+{post.images.length - 5}</div>
                                 )}
@@ -6201,7 +6234,7 @@ Examples:
                             onMouseUp={() => { if (reactionLongPressTimer) { clearTimeout(reactionLongPressTimer); setReactionLongPressTimer(null); } }}
                             onMouseLeave={() => { if (reactionLongPressTimer) { clearTimeout(reactionLongPressTimer); setReactionLongPressTimer(null); } }}
                             onTouchStart={() => handleReactionLongPressStart(post.id)}
-                            onTouchEnd={(e) => { e.preventDefault(); if (reactionLongPressTimer) { clearTimeout(reactionLongPressTimer); setReactionLongPressTimer(null); } if (!reactionPickerOpen) handleReactPost(post.id, post.myReaction || 'heart'); }}
+                            onTouchEnd={(e) => { if (e.cancelable) e.preventDefault(); if (reactionLongPressTimer) { clearTimeout(reactionLongPressTimer); setReactionLongPressTimer(null); } if (!reactionPickerOpen) handleReactPost(post.id, post.myReaction || 'heart'); }}
                             onContextMenu={(e) => { e.preventDefault(); setReactionPickerOpen(post.id); }}
                           >
                             <span className="react-btn-emoji">{post.myReaction ? REACTION_EMOJIS[post.myReaction] : '🤍'}</span>
@@ -6482,6 +6515,7 @@ Examples:
                           alt=""
                           className={`community-photo-viewer-img${communityImgLoaded[`viewer-${photoViewerOpen.images[photoViewerIndex].id}`] ? ' loaded' : ''}`}
                           onLoad={() => setCommunityImgLoaded(prev => ({ ...prev, [`viewer-${photoViewerOpen.images[photoViewerIndex].id}`]: true }))}
+                          onError={() => setCommunityImgLoaded(prev => ({ ...prev, [`viewer-${photoViewerOpen.images[photoViewerIndex].id}`]: true }))}
                         />
                       </>
                     )}
